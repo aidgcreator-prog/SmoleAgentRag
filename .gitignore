@@ -1,0 +1,22 @@
+# Python Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ChromaDB & Visual Index (Persistent Data)
+chroma_db/
+visual_index/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Local environment files
+.env
+.venv
+```

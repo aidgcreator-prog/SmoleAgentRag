@@ -1,0 +1,243 @@
+Here's the simplest setup I recommend for using **multiple GitHub accounts** on one Windows PC. You only need to do this once.
+
+---
+
+# 1. Generate one SSH key per GitHub account
+
+For your personal account:
+
+```powershell
+ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519_seyhah -C "seyhah"
+```
+
+For your work account:
+
+```powershell
+ssh-keygen -t ed25519 -f $HOME\.ssh\id_ed25519_aidg -C "aidgcreator-prog"
+```
+
+---
+
+# 2. Add each public key to the correct GitHub account
+
+Show the public key:
+
+```powershell
+type "$HOME\.ssh\id_ed25519_seyhah.pub"
+```
+
+Copy it into the **seyhah** GitHub account.
+
+Then:
+
+```powershell
+type "$HOME\.ssh\id_ed25519_aidg.pub"
+```
+
+Copy it into the **aidgcreator-prog** GitHub account.
+
+GitHub:
+
+* Profile → **Settings**
+* **SSH and GPG keys**
+* **New SSH key**
+
+---
+
+# 3. Create `C:\Users\User\.ssh\config`
+
+**Important:** The file name is **`config`**, **not** `config.txt`.
+
+Contents:
+
+```text
+Host github-seyhah
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_seyhah
+    IdentitiesOnly yes
+
+Host github-aidg
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_aidg
+    IdentitiesOnly yes
+```
+
+---
+
+# 4. Test both accounts
+
+Personal:
+
+```powershell
+ssh -T git@github-seyhah
+```
+
+Expected:
+
+```text
+Hi seyhah! You've successfully authenticated...
+```
+
+Work:
+
+```powershell
+ssh -T git@github-aidg
+```
+
+Expected:
+
+```text
+Hi aidgcreator-prog! You've successfully authenticated...
+```
+
+---
+
+# 5. Clone repositories correctly
+
+### Personal repositories
+
+```bash
+git clone git@github-seyhah:seyhah/myrepo.git
+```
+
+### Work repositories
+
+```bash
+git clone git@github-aidg:aidgcreator-prog/myrepo.git
+```
+
+---
+
+# 6. Convert an existing repository
+
+Go to the repository:
+
+```powershell
+cd F:\LocalAiLab\smolagent_rag
+```
+
+Check the remote:
+
+```powershell
+git remote -v
+```
+
+### If it's a work repository
+
+```powershell
+git remote set-url origin git@github-aidg:aidgcreator-prog/smolagent_rag.git
+```
+
+### If it's a personal repository
+
+```powershell
+git remote set-url origin git@github-seyhah:seyhah/smolagent_rag.git
+```
+
+---
+
+# 7. Push normally
+
+```powershell
+git push
+```
+
+or the first time:
+
+```powershell
+git push -u origin main
+```
+
+No need to log in or out.
+
+---
+
+# 8. Cache your SSH passphrase (optional but recommended)
+
+Start the SSH agent:
+
+```powershell
+Get-Service ssh-agent | Set-Service -StartupType Automatic
+Start-Service ssh-agent
+```
+
+Add your keys:
+
+```powershell
+ssh-add $HOME\.ssh\id_ed25519_seyhah
+ssh-add $HOME\.ssh\id_ed25519_aidg
+```
+
+After entering each passphrase once, the SSH agent remembers it for the session.
+
+---
+
+# Folder structure
+
+```
+C:\Users\User\.ssh\
+│
+├── config
+├── id_ed25519_seyhah
+├── id_ed25519_seyhah.pub
+├── id_ed25519_aidg
+├── id_ed25519_aidg.pub
+├── known_hosts
+└── known_hosts.old
+```
+
+---
+
+# Example remotes
+
+**Personal (`seyhah`)**
+
+```text
+origin  git@github-seyhah:seyhah/myproject.git
+```
+
+**Work (`aidgcreator-prog`)**
+
+```text
+origin  git@github-aidg:aidgcreator-prog/myproject.git
+```
+
+---
+
+# Common commands
+
+Check which remote a repository uses:
+
+```powershell
+git remote -v
+```
+
+Test the personal account:
+
+```powershell
+ssh -T git@github-seyhah
+```
+
+Test the work account:
+
+```powershell
+ssh -T git@github-aidg
+```
+
+Push:
+
+```powershell
+git push
+```
+
+Pull:
+
+```powershell
+git pull
+```
+
+---
+
+This setup scales well—you can add more accounts later by creating another SSH key and another `Host` entry in `~/.ssh/config`. Each repository simply points to the appropriate SSH alias, and Git automatically uses the correct account.
