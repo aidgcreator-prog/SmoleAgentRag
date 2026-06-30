@@ -5,6 +5,7 @@ Tabs:
   💬 General Chat  — direct LLM conversation, no retrieval
   📚 RAG Chat      — always retrieves from ChromaDB before answering
   🖼️ Vision Chat   — image upload + optional visual RAG
+  🎙️ Speech to Text — transcribe audio to text using Whisper
   📂 Knowledge Base — index / manage documents
 """
 
@@ -31,7 +32,7 @@ from PIL import Image
 LANGUAGES = {
     "kh": {
         "title": "🔍 ភ្នាក់ងារ RAG",
-        "subtitle": "smolagents · ChromaDB · Gemma4 / Qwen3.6 · {device}",
+        "subtitle": "smolagents · ChromaDB · Gemma4 / Qwen3.6 · {device} · បង្កើតដោយ LocalAiLab",
         "tab_general": "💬 ការសន្ទនាទូទៅ",
         "tab_general_desc": "ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយកទិន្នន័យឡើយ។",
         "tab_rag": "📚 ការសន្ទនា RAG",
@@ -39,6 +40,8 @@ LANGUAGES = {
         "tab_vision": "🖼️ ការសន្ទនាចក្ខុវិស័យ",
         "tab_vision_desc": "បង្ហោះរូបភាព និងសួរអំពីវា។",
         "tab_kb": "📂 មូលដ្ឋានចំណេះដឹង",
+        "tab_stt": "🎙️ និយាយទៅជាអក្សរ",
+        "tab_stt_desc": "បង្ហោះ ឬថតសំឡេង ដើម្បីបំលែងវាទៅជាអក្សរ។",
         "tab_about": "ℹ️ អំពីកម្មវិធី",
         "placeholder_gen": "និយាយអ្វីមួយ...",
         "placeholder_rag": "សួរអំពីឯកសាររបស់អ្នក...",
@@ -53,12 +56,17 @@ LANGUAGES = {
         "btn_clear_all": "💥 លុបទាំងអស់",
         "label_llm": "🤖 LLM",
         "label_vlm": "🎨 Vision LLM",
+        "label_stt": "🎙️ ម៉ូដែលនិយាយទៅជាអក្សរ",
+        "label_stt_lang": "🌐 ភាសានៃសំឡេង",
+        "btn_transcribe": "📝 បំលែងជាអក្សរ",
+        "stt_audio_label": "ថត ឬបង្ហោះសំឡេង",
         "label_vis_rag": "🔍 ក៏ទាញយកបរិបទអត្ថបទផងដែរ",
         "label_vis_ret": "🖼️ អ្នកទាញយកចក្ខុវិស័យ (PDFs)",
         "label_ds_name": "Dataset",
         "label_ds_text": "Text col",
         "label_ds_src": "Source col",
         "label_res": "លទ្ធផល",
+        "doc_table_headers": ["ប្រភព", "ប្រភេទ", "ទំព័រ", "ចំនួន Chunk"],
         "label_kb_docs": "📋 ឯកសារដែលបានបញ្ចូល",
         "header_docs": "--- \n### 📋 ឯកសារដែលបានបញ្ចូល",
         "accordion_add": "📤 បន្ថែមឯកសារ",
@@ -66,7 +74,7 @@ LANGUAGES = {
         "tab_hf": "HuggingFace Dataset",
         "file_label": "ទម្លាក់ PDF / TXT / MD",
         "about_tabs_title": "## ផ្ទាំង",
-        "about_tabs_desc": "| ផ្ទាំង | ការពិពណ៌នា |\n|---|---|\n| 💬 ការសន្ទនាទូទៅ | ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយក |\n| 📚 ការសន្ទនា RAG | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន រួចឆ្លើយ |\n| 🖼️ ការសន្ទនាចក្ខុវិស័យ | យល់ដឹងរូបភាព ជាមួយបរិបទអត្ថបទ |\n| 📂 មូលដ្ឋានចំណេះដឹង | បង្ហោះ និងគ្រប់គ្រងឯកសារ |",
+        "about_tabs_desc": "| ផ្ទាំង | ការពិពណ៌នា |\n|---|---|\n| 💬 ការសន្ទនាទូទៅ | ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយក |\n| 📚 ការសន្ទនា RAG | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន រួចឆ្លើយ |\n| 🖼️ ការសន្ទនាចក្ខុវិស័យ | យល់ដឹងរូបភាព ជាមួយបរិបទអត្ថបទ |\n| 🎙️ និយាយទៅជាអក្សរ | បំលែងសំឡេងជាអក្សរ ដោយប្រើ Whisper |\n| 📂 មូលដ្ឋានចំណេះដឹង | បង្ហោះ និងគ្រប់គ្រងឯកសារ |",
         "about_arch_title": "## ស្ថាបត្យកម្ម",
         "about_arch_desc": "| សមាសធាតុ | លម្អិត |\n|---|---|",
         "about_speed_title": "## ល្បឿនរំពឹងទុក ({device})",
@@ -108,7 +116,7 @@ LANGUAGES = {
     },
     "en": {
         "title": "🔍 RAG Agent",
-        "subtitle": "smolagents · ChromaDB · Gemma4 / Qwen3.6 · {device}",
+        "subtitle": "smolagents · ChromaDB · Gemma4 / Qwen3.6 · {device} · Developed by LocalAiLab",
         "tab_general": "💬 General Chat",
         "tab_general_desc": "Direct conversation with the LLM — no retrieval.",
         "tab_rag": "📚 RAG Chat",
@@ -116,6 +124,8 @@ LANGUAGES = {
         "tab_vision": "🖼️ Vision Chat",
         "tab_vision_desc": "Upload an image and ask questions about it.",
         "tab_kb": "📂 Knowledge Base",
+        "tab_stt": "🎙️ Speech to Text",
+        "tab_stt_desc": "Upload or record audio to transcribe it into text.",
         "tab_about": "ℹ️ About",
         "placeholder_gen": "Say anything ...",
         "placeholder_rag": "Ask about your documents ...",
@@ -130,12 +140,17 @@ LANGUAGES = {
         "btn_clear_all": "💥 Clear ALL",
         "label_llm": "🤖 LLM",
         "label_vlm": "🎨 Vision LLM",
+        "label_stt": "🎙️ Speech-to-Text Model",
+        "label_stt_lang": "🌐 Audio Language",
+        "btn_transcribe": "📝 Transcribe",
+        "stt_audio_label": "Record or upload audio",
         "label_vis_rag": "🔍 Also retrieve text context",
         "label_vis_ret": "🖼️ Visual retriever (PDFs)",
         "label_ds_name": "Dataset",
         "label_ds_text": "Text col",
         "label_ds_src": "Source col",
         "label_res": "Result",
+        "doc_table_headers": ["Source", "Type", "Pages", "Chunks"],
         "label_kb_docs": "📋 Indexed Documents",
         "header_docs": "--- \n### 📋 Indexed Documents",
         "accordion_add": "📤 Add Documents",
@@ -143,7 +158,7 @@ LANGUAGES = {
         "tab_hf": "HuggingFace Dataset",
         "file_label": "Drop PDF / TXT / MD",
         "about_tabs_title": "## Tabs",
-        "about_tabs_desc": "| Tab | Description |\n|---|---|\n| 💬 General Chat | Direct LLM conversation — no retrieval |\n| 📚 RAG Chat | Retrieves from knowledge base first, then answers |\n| 🖼️ Vision Chat | Image understanding with optional text context |\n| 📂 Knowledge Base | Upload & manage indexed documents |",
+        "about_tabs_desc": "| Tab | Description |\n|---|---|\n| 💬 General Chat | Direct LLM conversation — no retrieval |\n| 📚 RAG Chat | Retrieves from knowledge base first, then answers |\n| 🖼️ Vision Chat | Image understanding with optional text context |\n| 🎙️ Speech to Text | Transcribe audio into text using Whisper |\n| 📂 Knowledge Base | Upload & manage indexed documents |",
         "about_arch_title": "## Architecture",
         "about_arch_desc": "| Component | Detail |\n|---|---|",
         "about_speed_title": "## Expected speed ({device})",
@@ -310,6 +325,21 @@ TORCH_DTYPE = torch.float16 if DEVICE != "cpu" else torch.float32
 
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
+# ──────────────────────────────────────────────────────────────────
+# Developer branding (LocalAiLab logo, shown in the header)
+# ──────────────────────────────────────────────────────────────────
+_LOGO_PATH = Path(__file__).parent / "assets" / "logo.jpg"
+
+def _load_logo_b64() -> str:
+    try:
+        data = _LOGO_PATH.read_bytes()
+        return base64.b64encode(data).decode("utf-8")
+    except Exception:
+        return ""
+
+DEVELOPER_LOGO_B64 = _load_logo_b64()
+DEVELOPER_NAME = "LocalAiLab"
+
 MODEL_OPTIONS = {
     "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)": "Qwen/Qwen3-0.6B",
     "🟡 Qwen3-1.7B   (~3 GB RAM)":             "Qwen/Qwen3-1.7B",
@@ -332,6 +362,15 @@ VISUAL_RETRIEVER_OPTIONS = {
     "vidore/colqwen2-v1.0    (~8 GB | higher accuracy)": "vidore/colqwen2-v1.0",
 }
 DEFAULT_VISUAL_RETRIEVER = "vidore/colsmolvlm-v0.1"
+
+STT_OPTIONS = {
+    "🟢 Whisper-tiny    (~1 GB RAM | fastest)":   "openai/whisper-tiny",
+    "🟡 Whisper-base    (~1 GB RAM)":              "openai/whisper-base",
+    "🟡 Whisper-small   (~2 GB RAM | recommended)": "openai/whisper-small",
+    "🔵 Whisper-large-v3 (~10 GB RAM | best accuracy, multilingual incl. Khmer)": "openai/whisper-large-v3",
+}
+DEFAULT_STT_LABEL = "🟡 Whisper-small   (~2 GB RAM | recommended)"
+DEFAULT_STT_MODEL = STT_OPTIONS[DEFAULT_STT_LABEL]
 
 DEFAULT_EMBED_MODEL = "BAAI/bge-m3"
 CHROMA_PERSIST_DIR  = "./chroma_db"
@@ -360,6 +399,9 @@ _visual_retriever    = None
 _visual_retriever_id = None
 _llm_lock            = threading.Lock()
 _vlm_lock            = threading.Lock()
+_stt_pipeline        = None
+_stt_model_id        = None
+_stt_lock            = threading.Lock()
 
 
 def get_embed_model():
@@ -403,7 +445,7 @@ def get_llm(model_id: Optional[str] = None):
         print(f"[RAG] Loading LLM '{target}' on {DEVICE.upper()} …")
         _llm = TransformersModel(
             model_id=target,
-            device=DEVICE,
+            device_map=DEVICE,
             torch_dtype=TORCH_DTYPE,
             max_new_tokens=MAX_NEW_TOKENS,
             temperature=0.6,
@@ -459,7 +501,7 @@ def get_vlm(model_id: Optional[str] = None):
         _vlm_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             target,
             torch_dtype=TORCH_DTYPE,
-            device=DEVICE,
+            device_map=DEVICE,
             trust_remote_code=True,
         )
 
@@ -488,7 +530,7 @@ def get_vlm(model_id: Optional[str] = None):
         _vlm_model = ModelClass.from_pretrained(
             target,
             torch_dtype=TORCH_DTYPE,
-            device=DEVICE,
+            device_map=DEVICE,
             trust_remote_code=True,
         )
 
@@ -502,9 +544,9 @@ def get_vlm(model_id: Optional[str] = None):
     return _vlm_model, _vlm_processor
 
 
-def vlm_answer(question: str, images: list, context: str = "") -> str:
+def vlm_answer(question: str, images: list, context: str = "", model_id: Optional[str] = None) -> str:
     try:
-        model, processor = get_vlm()
+        model, processor = get_vlm(model_id)
         arch = getattr(model, "_arch", "smolvlm")
         system_prompt = "You are a helpful assistant. Answer based on images and context."
         user_text = question + (f"\n\nContext:\n{context}" if context else "")
@@ -533,6 +575,56 @@ def vlm_answer(question: str, images: list, context: str = "") -> str:
     except Exception as e:
         import traceback
         return f"❌ Error during VLM generation: {str(e)}\n\n{traceback.format_exc()}"
+
+
+def get_stt_pipeline(model_id: Optional[str] = None):
+    global _stt_pipeline, _stt_model_id
+    target = model_id or DEFAULT_STT_MODEL
+
+    if _stt_pipeline is not None and target == _stt_model_id:
+        return _stt_pipeline
+
+    with _stt_lock:
+        if _stt_pipeline is not None and target == _stt_model_id:
+            return _stt_pipeline
+
+        print(f"[STT] Loading '{target}' on {DEVICE.upper()} …")
+        from transformers import pipeline as hf_pipeline
+
+        # pipeline() wants an integer device index for cuda, "mps", or -1 for cpu
+        if DEVICE == "cuda":
+            device_arg = 0
+        elif DEVICE == "mps":
+            device_arg = "mps"
+        else:
+            device_arg = -1
+
+        _stt_pipeline = hf_pipeline(
+            "automatic-speech-recognition",
+            model=target,
+            torch_dtype=TORCH_DTYPE,
+            device=device_arg,
+        )
+        _stt_model_id = target
+        return _stt_pipeline
+
+
+def transcribe_audio(audio_path: Optional[str], language: Optional[str] = None,
+                     model_id: Optional[str] = None) -> str:
+    if not audio_path:
+        return ""
+    try:
+        asr = get_stt_pipeline(model_id)
+        gen_kwargs = {}
+        if language and language != "auto":
+            gen_kwargs["language"] = language
+            gen_kwargs["task"] = "transcribe"
+        result = asr(audio_path, generate_kwargs=gen_kwargs or None)
+        text = result.get("text", "") if isinstance(result, dict) else str(result)
+        return text.strip()
+    except Exception as e:
+        import traceback
+        return f"❌ {e}\n\n{traceback.format_exc()}"
 
 
 def get_visual_retriever(model_id: Optional[str] = None):
@@ -754,10 +846,11 @@ def clear_index() -> tuple:
     return [], "🗑️ All documents cleared."
 
 
-def get_index_stats() -> str:
+def get_index_stats(lang_key: str = "en") -> str:
+    l = LANGUAGES[lang_key]
     n       = get_chroma_collection().count()
-    vis_str = "✅ ready" if (Path(VISUAL_INDEX_DIR) / "main").exists() else "empty"
-    return f"📚 Text chunks: {n}  |  Visual index: {vis_str}  |  Device: {DEVICE.upper()}"
+    vis_str = l["err_visual_ready"] if (Path(VISUAL_INDEX_DIR) / "main").exists() else l["err_empty_visual"]
+    return l["err_status_bar"].format(n=n, vis=vis_str, dev=DEVICE.upper())
 
 
 def retrieve_context(query: str) -> tuple[str, list[str]]:
@@ -906,7 +999,7 @@ def chat_vision(user_message: str, uploaded_image, history: list,
             pil_images.extend(visual_retrieve(user_message, top_k=2))
         context, _ = retrieve_context(user_message) if user_message else ("", [])
         t0  = time.time()
-        ans = vlm_answer(user_message, pil_images, context=context)
+        ans = vlm_answer(user_message, pil_images, context=context, model_id=vlm_id)
         elapsed  = time.time() - t0
         response = (f"{ans}\n\n*⏱ {elapsed:.1f}s | VLM: `{vlm_id}` ({DEVICE.upper()})"
                     f" | images: {len(pil_images)}*")
@@ -922,6 +1015,8 @@ CSS = """
 .header-wrap  { display:flex; align-items:baseline; gap:12px; margin-bottom:6px; }
 .header-title { font-size:1.6rem; font-weight:700; }
 .header-sub   { font-size:0.9rem; color:#aaa; }
+.dev-logo     { width:56px; height:56px; border-radius:50%; object-fit:cover;
+                box-shadow:0 0 8px rgba(120,80,255,0.6); flex-shrink:0; margin-right:4px; }
 """
 
 def refresh_system_ui():
@@ -955,12 +1050,22 @@ def fix_system_ui_generator():
 
 
 def build_ui():
-    with gr.Blocks(title="🔍 RAG Agent", css=CSS) as demo:
+    with gr.Blocks(title="🔍 RAG Agent") as demo:
+        lang_state = gr.State("kh")
+
         # Header
         with gr.Row():
             with gr.Column(scale=8):
-                header_title = gr.HTML(f'<div class="header-wrap"><span class="header-title">🔍 RAG Agent</span></div>')
-                header_sub = gr.HTML(f'<div class="header-wrap"><span class="header-sub">smolagents · ChromaDB · Gemma4 / Qwen3.6 · {DEVICE.upper()}</span></div>')
+                with gr.Row():
+                    if DEVELOPER_LOGO_B64:
+                        with gr.Column(scale=0, min_width=64):
+                            gr.HTML(
+                                f'<img src="data:image/jpeg;base64,{DEVELOPER_LOGO_B64}" '
+                                f'class="dev-logo" alt="{DEVELOPER_NAME} logo" />'
+                            )
+                    with gr.Column():
+                        header_title = gr.HTML()
+                        header_sub = gr.HTML()
             with gr.Column(scale=2, variant="panel"):
                 lang_dropdown = gr.Dropdown(
                     choices=["Khmer", "English"],
@@ -969,267 +1074,207 @@ def build_ui():
                     scale=1
                 )
 
-        # --- Update UI helper ---
-        def update_ui_elements(lang_key):
+        @gr.render(inputs=[lang_state])
+        def render_body(lang_key):
             l = LANGUAGES[lang_key]
-            h_title = f'<div class="header-wrap"><span class="header-title">{l["title"]}</span></div>'
-            h_sub   = f'<div class="header-wrap"><span class="header-sub">{l["subtitle"].format(device=DEVICE.upper())}</span></div>'
-            return (
-                # ── Header ──────────────────────────────────────────
-                h_title,
-                h_sub,
-                # ── General Chat ─────────────────────────────────────
-                gr.update(value=l["tab_general_desc"]),              # gen_desc
-                gr.update(placeholder=l["placeholder_gen"]),         # msg_gen
-                gr.update(value=l["btn_send"]),                      # send_gen
-                gr.update(label=l["label_llm"]),                     # model_dd_gen
-                gr.update(value=l["btn_load"]),                      # reload_gen
-                gr.update(value=l["btn_clear"]),                     # clear_gen
-                # ── RAG Chat ─────────────────────────────────────────
-                gr.update(value=l["tab_rag_desc"]),                  # rag_desc
-                gr.update(placeholder=l["placeholder_rag"]),         # msg_rag
-                gr.update(value=l["btn_send"]),                      # send_rag
-                gr.update(label=l["label_llm"]),                     # model_dd_rag
-                gr.update(value=l["btn_load"]),                      # reload_rag
-                gr.update(value=l["btn_clear"]),                     # clear_rag
-                # ── Vision Chat ──────────────────────────────────────
-                gr.update(value=l["tab_vision_desc"]),               # vis_desc
-                gr.update(placeholder=l["placeholder_vis"]),         # msg_vis
-                gr.update(value=l["btn_send"]),                      # send_vis
-                gr.update(label=l["label_vlm"]),                     # vlm_dd
-                gr.update(label=l["label_vis_rag"]),                 # vis_rag_chk
-                gr.update(value=l["btn_load"]),                      # load_vlm_btn
-                gr.update(value=l["btn_clear"]),                     # clear_vis
-                # ── Knowledge Base ───────────────────────────────────
-                gr.update(label=l["file_label"]),                    # file_up
-                gr.update(label=l["label_vis_ret"]),                 # vis_ret_dd
-                gr.update(value=l["btn_index"]),                     # up_btn
-                gr.update(label=l["label_res"]),                     # up_msg
-                gr.update(label=l["label_ds_name"]),                 # ds_name
-                gr.update(label=l["label_ds_text"]),                 # ds_textcol
-                gr.update(label=l["label_ds_src"]),                  # ds_srccol
-                gr.update(value=l["btn_load_ds"]),                   # ds_btn
-                gr.update(label=l["label_res"]),                     # ds_msg
-                gr.update(value=l["header_docs"]),                   # kb_md_sep
-                gr.update(value=l["btn_refresh"]),                   # refresh_btn
-                gr.update(value=l["btn_delete"]),                    # delete_sel_btn
-                gr.update(value=l["btn_clear_all"]),                 # clear_all_btn
-                # ── About ────────────────────────────────────────────
-                gr.update(value=l["about_tabs_title"]),              # about_tabs_title_md
-                gr.update(value=l["about_tabs_desc"]),               # about_tabs_desc_md
-                gr.update(value=l["about_arch_title"]),              # about_arch_title_md
-                gr.update(value=l["about_arch_desc"]),               # about_arch_desc_md
-                gr.update(value=l["about_speed_title"].format(device=DEVICE.upper())),  # about_speed_title_md
-                gr.update(value=l["about_speed_desc"]),              # about_speed_desc_md
-            )
 
-        # We will define the components first, then use the update function.
-        # Since we need to pass these to the update function, we must define them.
+            header_title.value = f'<div class="header-wrap"><span class="header-title">{l["title"]}</span></div>'
+            header_sub.value   = f'<div class="header-wrap"><span class="header-sub">{l["subtitle"].format(device=DEVICE.upper())}</span></div>'
 
-        with gr.Tabs() as tabs_container:
+            with gr.Tabs():
 
-            # ── Tab 1: General Chat ────────────────────────────────
-            with gr.Tab("💬 General Chat") as tab_gen:
-                gen_desc = gr.Markdown("Direct conversation with the LLM — no retrieval.")
-                bot_gen = gr.Chatbot(label="General Chat", height=440)
-                with gr.Row():
-                    msg_gen  = gr.Textbox(placeholder="Say anything ...", show_label=False, scale=8)
-                    send_gen = gr.Button("Send ▶", variant="primary", scale=1)
-                with gr.Row():
-                    model_dd_gen = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label="🤖 LLM", scale=6)
-                    reload_gen   = gr.Button("🔄 Load", size="sm", scale=2)
-                    reload_gen_out = gr.Textbox(show_label=False, interactive=False, scale=4)
-                clear_gen = gr.Button("🗑️ Clear", size="sm")
+                # ── Tab 1: General Chat ────────────────────────────────
+                with gr.Tab(l["tab_general"]):
+                    gr.Markdown(l["tab_general_desc"])
+                    bot_gen = gr.Chatbot(label=l["tab_general"], height=440)
+                    with gr.Row():
+                        msg_gen  = gr.Textbox(placeholder=l["placeholder_gen"], show_label=False, scale=8)
+                        send_gen = gr.Button(l["btn_send"], variant="primary", scale=1)
+                    with gr.Row():
+                        model_dd_gen = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label=l["label_llm"], scale=6)
+                        reload_gen   = gr.Button(l["btn_load"], size="sm", scale=2)
+                        reload_gen_out = gr.Textbox(show_label=False, interactive=False, scale=4)
+                    clear_gen = gr.Button(l["btn_clear"], size="sm")
 
-                def reload_gen_fn(label):
-                    global _llm; _llm = None
-                    mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
-                    try:
-                        get_llm(mid); return f"✅ '{mid}' loaded"
-                    except Exception as e:
-                        return f"❌ {e}"
+                    def reload_gen_fn(label):
+                        global _llm; _llm = None
+                        mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
+                        try:
+                            get_llm(mid); return f"✅ '{mid}' loaded"
+                        except Exception as e:
+                            return f"❌ {e}"
 
-                msg_gen.submit(chat_general, [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
-                send_gen.click(chat_general, [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
-                clear_gen.click(lambda: ([], ""), outputs=[bot_gen, msg_gen])
-                reload_gen.click(reload_gen_fn, [model_dd_gen], [reload_gen_out])
+                    msg_gen.submit(chat_general, [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
+                    send_gen.click(chat_general, [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
+                    clear_gen.click(lambda: ([], ""), outputs=[bot_gen, msg_gen])
+                    reload_gen.click(reload_gen_fn, [model_dd_gen], [reload_gen_out])
 
-            # ── Tab 2: RAG Chat ────────────────────────────────────
-            with gr.Tab("📚 RAG Chat") as tab_rag:
-                rag_desc = gr.Markdown("Every question retrieves from the knowledge base first, then the LLM answers using only that context.")
-                bot_rag = gr.Chatbot(label="RAG Chat", height=440)
-                with gr.Row():
-                    msg_rag  = gr.Textbox(placeholder="Ask about your documents ...", show_label=False, scale=8)
-                    send_rag = gr.Button("Send ▶", variant="primary", scale=1)
-                with gr.Row():
-                    model_dd_rag = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label="🤖 LLM", scale=6)
-                    reload_rag   = gr.Button("🔄 Load", size="sm", scale=2)
-                    reload_rag_out = gr.Textbox(show_label=False, interactive=False, scale=4)
-                clear_rag = gr.Button("🗑️ Clear", size="sm")
+                # ── Tab 2: RAG Chat ────────────────────────────────────
+                with gr.Tab(l["tab_rag"]):
+                    gr.Markdown(l["tab_rag_desc"])
+                    bot_rag = gr.Chatbot(label=l["tab_rag"], height=440)
+                    with gr.Row():
+                        msg_rag  = gr.Textbox(placeholder=l["placeholder_rag"], show_label=False, scale=8)
+                        send_rag = gr.Button(l["btn_send"], variant="primary", scale=1)
+                    with gr.Row():
+                        model_dd_rag = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label=l["label_llm"], scale=6)
+                        reload_rag   = gr.Button(l["btn_load"], size="sm", scale=2)
+                        reload_rag_out = gr.Textbox(show_label=False, interactive=False, scale=4)
+                    clear_rag = gr.Button(l["btn_clear"], size="sm")
 
-                def reload_rag_fn(label):
-                    global _llm; _llm = None
-                    mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
-                    try:
-                        get_llm(mid); return f"✅ '{mid}' loaded"
-                    except Exception as e:
-                        return f"❌ {e}"
+                    def reload_rag_fn(label):
+                        global _llm; _llm = None
+                        mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
+                        try:
+                            get_llm(mid); return f"✅ '{mid}' loaded"
+                        except Exception as e:
+                            return f"❌ {e}"
 
-                msg_rag.submit(chat_rag, [msg_rag, bot_rag, model_dd_rag], [bot_rag, msg_rag])
-                send_rag.click(chat_rag, [msg_rag, bot_rag, model_dd_rag], [bot_rag, msg_rag])
-                clear_rag.click(lambda: ([], ""), outputs=[bot_rag, msg_rag])
-                reload_rag.click(reload_rag_fn, [model_dd_rag], [reload_rag_out])
+                    msg_rag.submit(chat_rag, [msg_rag, bot_rag, model_dd_rag], [bot_rag, msg_rag])
+                    send_rag.click(chat_rag, [msg_rag, bot_rag, model_dd_rag], [bot_rag, msg_rag])
+                    clear_rag.click(lambda: ([], ""), outputs=[bot_rag, msg_rag])
+                    reload_rag.click(reload_rag_fn, [model_dd_rag], [reload_rag_out])
 
-            # ── Tab 3: Vision Chat ─────────────────────────────────
-            with gr.Tab("🖼️ Vision Chat") as tab_vis:
-                vis_desc = gr.Markdown("Upload an image and ask questions about it.")
-                bot_vis = gr.Chatbot(label="Vision Chat", height=400)
-                with gr.Row():
-                    msg_vis    = gr.Textbox(placeholder="Ask about the image ...", show_label=False, scale=6)
-                    img_upload = gr.Image(label="Image", type="pil", sources=["upload", "clipboard"], scale=2)
-                    send_vis   = gr.Button("Send ▶", variant="primary", scale=1)
-                with gr.Row():
-                    vlm_dd       = gr.Dropdown(choices=list(VLM_OPTIONS.keys()), value=DEFAULT_VLM_LABEL, label="🎨 Vision LLM", scale=5)
-                    vis_rag_chk  = gr.Checkbox(label="🔍 Also retrieve text context", value=True, scale=2)
-                    load_vlm_btn = gr.Button("🔄 Load VLM", size="sm", scale=2)
-                    load_vlm_out = gr.Textbox(show_label=False, interactive=False, scale=3)
-                clear_vis = gr.Button("🗑️ Clear", size="sm")
+                # ── Tab 3: Vision Chat ─────────────────────────────────
+                with gr.Tab(l["tab_vision"]):
+                    gr.Markdown(l["tab_vision_desc"])
+                    bot_vis = gr.Chatbot(label=l["tab_vision"], height=400)
+                    with gr.Row():
+                        msg_vis    = gr.Textbox(placeholder=l["placeholder_vis"], show_label=False, scale=6)
+                        img_upload = gr.Image(label=l["tab_vision"], type="pil", sources=["upload", "clipboard"], scale=2)
+                        send_vis   = gr.Button(l["btn_send"], variant="primary", scale=1)
+                    with gr.Row():
+                        vlm_dd       = gr.Dropdown(choices=list(VLM_OPTIONS.keys()), value=DEFAULT_VLM_LABEL, label=l["label_vlm"], scale=5)
+                        vis_rag_chk  = gr.Checkbox(label=l["label_vis_rag"], value=True, scale=2)
+                        load_vlm_btn = gr.Button(l["btn_load"], size="sm", scale=2)
+                        load_vlm_out = gr.Textbox(show_label=False, interactive=False, scale=3)
+                    clear_vis = gr.Button(l["btn_clear"], size="sm")
 
-                def load_vlm_fn(label):
-                    global _vlm_model, _vlm_processor
-                    _vlm_model = _vlm_processor = None
-                    mid = VLM_OPTIONS.get(label, DEFAULT_VLM_MODEL)
-                    try:
-                        get_vlm(mid); return f"✅ '{mid}' loaded"
-                    except Exception as e:
-                        return f"❌ {e}"
+                    def load_vlm_fn(label):
+                        global _vlm_model, _vlm_processor
+                        _vlm_model = _vlm_processor = None
+                        mid = VLM_OPTIONS.get(label, DEFAULT_VLM_MODEL)
+                        try:
+                            get_vlm(mid); return f"✅ '{mid}' loaded"
+                        except Exception as e:
+                            return f"❌ {e}"
 
-                send_vis.click(chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
-                msg_vis.submit(chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
-                clear_vis.click(lambda: ([], None), outputs=[bot_vis, img_upload])
-                load_vlm_btn.click(load_vlm_fn, [vlm_dd], [load_vlm_out])
+                    send_vis.click(chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
+                    msg_vis.submit(chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
+                    clear_vis.click(lambda: ([], None), outputs=[bot_vis, img_upload])
+                    load_vlm_btn.click(load_vlm_fn, [vlm_dd], [load_vlm_out])
 
-            # ── Tab 4: Knowledge Base ──────────────────────────────
-            with gr.Tab("📂 Knowledge Base") as tab_kb:
-                with gr.Accordion("📤 Add Documents", open=True) as acc_add:
-                    with gr.Tabs():
-                        with gr.Tab("Upload Files") as tab_up:
-                            file_up    = gr.File(label="Drop PDF / TXT / MD", file_types=[".pdf", ".txt", ".md"], file_count="multiple")
-                            vis_ret_dd = gr.Dropdown(choices=list(VISUAL_RETRIEVER_OPTIONS.keys()), value=list(VISUAL_RETRIEVER_OPTIONS.keys())[0], label="🖼️ Visual retriever (PDFs)")
-                            up_btn = gr.Button("📥 Index files", variant="primary")
-                            up_msg = gr.Textbox(label="Result", interactive=False, lines=4)
+                # ── Tab 4: Speech to Text ───────────────────────────────
+                with gr.Tab(l["tab_stt"]):
+                    gr.Markdown(l["tab_stt_desc"])
+                    stt_audio = gr.Audio(label=l["stt_audio_label"], sources=["microphone", "upload"], type="filepath")
+                    with gr.Row():
+                        stt_dd      = gr.Dropdown(choices=list(STT_OPTIONS.keys()), value=DEFAULT_STT_LABEL, label=l["label_stt"], scale=5)
+                        stt_lang_dd = gr.Dropdown(
+                            choices=[("Auto-detect", "auto"), ("English", "english"), ("Khmer", "khmer"),
+                                     ("French", "french"), ("Chinese", "chinese"), ("Japanese", "japanese")],
+                            value="auto", label=l["label_stt_lang"], scale=3,
+                        )
+                        load_stt_btn = gr.Button(l["btn_load"], size="sm", scale=2)
+                        load_stt_out = gr.Textbox(show_label=False, interactive=False, scale=3)
+                    transcribe_btn = gr.Button(l["btn_transcribe"], variant="primary")
+                    stt_output = gr.Textbox(label=l["label_res"], lines=8, interactive=True)
 
-                        with gr.Tab("HuggingFace Dataset") as tab_hf:
-                            with gr.Row():
-                                ds_name    = gr.Textbox(label="Dataset", value="m-ric/huggingface_doc", scale=3)
-                                ds_textcol = gr.Textbox(label="Text col", value="text", scale=1)
-                                ds_srccol  = gr.Textbox(label="Source col", value="source", scale=1)
-                            ds_btn = gr.Button("⬇️ Load & index", variant="secondary")
-                            ds_msg = gr.Textbox(label="Result", interactive=False, lines=2)
+                    def load_stt_fn(label):
+                        global _stt_pipeline, _stt_model_id
+                        _stt_pipeline = None
+                        _stt_model_id = None
+                        mid = STT_OPTIONS.get(label, DEFAULT_STT_MODEL)
+                        try:
+                            get_stt_pipeline(mid); return f"✅ '{mid}' loaded"
+                        except Exception as e:
+                            return f"❌ {e}"
 
-                kb_md_sep = gr.Markdown("---\n### 📋 Indexed Documents")
-                doc_table = gr.Dataframe(
-                    headers=["Source", "Type", "Pages", "Chunks"],
-                    datatype=["str", "str", "str", "number"],
-                    value=get_doc_table,
-                    interactive=True, wrap=True,
-                )
-                with gr.Row():
-                    refresh_btn    = gr.Button("🔄 Refresh", size="sm", scale=2)
-                    delete_sel_btn = gr.Button("🗑️ Delete Selected", variant="stop", size="sm", scale=2)
-                    clear_all_btn  = gr.Button("💥 Clear ALL", variant="stop", size="sm", scale=2)
-                action_msg = gr.Textbox(label="", interactive=False, lines=1)
-                selected_rows_state = gr.State([])
+                    def do_transcribe(audio_path, stt_label, lang_choice):
+                        mid = STT_OPTIONS.get(stt_label, DEFAULT_STT_MODEL)
+                        return transcribe_audio(audio_path, language=lang_choice, model_id=mid)
 
-                def on_select(evt: gr.SelectData, current):
-                    row = evt.index[0]
-                    if row in current: current.remove(row)
-                    else:              current.append(row)
-                    return current
+                    transcribe_btn.click(do_transcribe, [stt_audio, stt_dd, stt_lang_dd], [stt_output])
+                    load_stt_btn.click(load_stt_fn, [stt_dd], [load_stt_out])
 
-                def do_upload(files, vis_ret_label):
-                    import traceback
-                    try:
-                        return index_uploaded_files(files, vis_ret_label), get_doc_table()
-                    except Exception as e:
-                        return f"❌ {traceback.format_exc()}", get_doc_table()
+                # ── Tab 5: Knowledge Base ──────────────────────────────
+                with gr.Tab(l["tab_kb"]):
+                    with gr.Accordion(l["accordion_add"], open=True):
+                        with gr.Tabs():
+                            with gr.Tab(l["tab_upload"]):
+                                file_up    = gr.File(label=l["file_label"], file_types=[".pdf", ".txt", ".md"], file_count="multiple")
+                                vis_ret_dd = gr.Dropdown(choices=list(VISUAL_RETRIEVER_OPTIONS.keys()), value=list(VISUAL_RETRIEVER_OPTIONS.keys())[0], label=l["label_vis_ret"])
+                                up_btn = gr.Button(l["btn_index"], variant="primary")
+                                up_msg = gr.Textbox(label=l["label_res"], interactive=False, lines=4)
 
-                def do_delete(selected, table_data):
-                    rows = (table_data if isinstance(table_data, list)
-                            else table_data.values.tolist())
-                    new_table, msg = delete_selected_sources(selected, rows)
-                    return new_table, msg, []
+                            with gr.Tab(l["tab_hf"]):
+                                with gr.Row():
+                                    ds_name    = gr.Textbox(label=l["label_ds_name"], value="m-ric/huggingface_doc", scale=3)
+                                    ds_textcol = gr.Textbox(label=l["label_ds_text"], value="text", scale=1)
+                                    ds_srccol  = gr.Textbox(label=l["label_ds_src"], value="source", scale=1)
+                                ds_btn = gr.Button(l["btn_load_ds"], variant="secondary")
+                                ds_msg = gr.Textbox(label=l["label_res"], interactive=False, lines=2)
 
-                def do_clear():
-                    table, msg = clear_index()
-                    return table, msg, []
+                    gr.Markdown(l["header_docs"])
+                    doc_table = gr.Dataframe(
+                        headers=l["doc_table_headers"],
+                        datatype=["str", "str", "str", "number"],
+                        value=get_doc_table,
+                        interactive=True, wrap=True,
+                    )
+                    with gr.Row():
+                        refresh_btn    = gr.Button(l["btn_refresh"], size="sm", scale=2)
+                        delete_sel_btn = gr.Button(l["btn_delete"], variant="stop", size="sm", scale=2)
+                        clear_all_btn  = gr.Button(l["btn_clear_all"], variant="stop", size="sm", scale=2)
+                    action_msg = gr.Textbox(label="", interactive=False, lines=1)
+                    selected_rows_state = gr.State([])
 
-                doc_table.select(on_select, [selected_rows_state], [selected_rows_state])
-                up_btn.click(do_upload, [file_up, vis_ret_dd], [up_msg, doc_table])
-                ds_btn.click(index_hf_dataset, [ds_name, ds_textcol, ds_srccol], [ds_msg, doc_table])
-                refresh_btn.click(get_doc_table, outputs=[doc_table])
-                delete_sel_btn.click(do_delete, [selected_rows_state, doc_table], [doc_table, action_msg, selected_rows_state])
-                clear_all_btn.click(do_clear, outputs=[doc_table, action_msg, selected_rows_state])
+                    def on_select(evt: gr.SelectData, current):
+                        row = evt.index[0]
+                        if row in current: current.remove(row)
+                        else:              current.append(row)
+                        return current
 
-            # ── Tab 5: About ───────────────────────────────────────
-            with gr.Tab("ℹ️ About") as tab_about:
-                about_tabs_title_md  = gr.Markdown("## Tabs")
-                about_tabs_desc_md   = gr.Markdown(
-                    "| Tab | Description |\n|---|---|\n"
-                    "| 💬 General Chat | Direct LLM conversation — no retrieval |\n"
-                    "| 📚 RAG Chat | Retrieves from knowledge base first, then answers |\n"
-                    "| 🖼️ Vision Chat | Image understanding with optional text context |\n"
-                    "| 📂 Knowledge Base | Upload & manage indexed documents |"
-                )
-                about_arch_title_md  = gr.Markdown("## Architecture")
-                about_arch_desc_md   = gr.Markdown(
-                    f"| Component | Detail |\n|---|---|\n"
-                    f"| Text LLM | Qwen3-0.6B (default) — {DEVICE.upper()} |\n"
-                    f"| Vision LLM | SmolVLM-500M (default) — {DEVICE.upper()} |\n"
-                    f"| Embedding | BAAI/bge-m3 via SentenceTransformer — {DEVICE.upper()} |\n"
-                    f"| Vector Store | ChromaDB (persistent, `./chroma_db`) |\n"
-                    f"| GPU | Dynamic detection (NVIDIA/AMD/Mac/CPU) |"
-                )
-                about_speed_title_md = gr.Markdown(f"## Expected speed ({DEVICE.upper()})")
-                about_speed_desc_md  = gr.Markdown(
-                    "| Task | Time |\n|---|---|\n"
-                    "| Index a document | 10–60 s |\n"
-                    "| General / RAG answer | 1–5 min |\n"
-                    "| Vision answer | 2–8 min |"
-                )
+                    def do_upload(files, vis_ret_label):
+                        import traceback
+                        try:
+                            return index_uploaded_files(files, vis_ret_label), get_doc_table()
+                        except Exception as e:
+                            return f"❌ {traceback.format_exc()}", get_doc_table()
 
-            # status_bar must be OUTSIDE gr.Tabs() to avoid the "only Tab children" warning
-        status_bar = gr.Textbox(value=get_index_stats, interactive=False, show_label=False, elem_classes=["status-bar"])
+                    def do_delete(selected, table_data):
+                        rows = (table_data if isinstance(table_data, list)
+                                else table_data.values.tolist())
+                        new_table, msg = delete_selected_sources(selected, rows)
+                        return new_table, msg, []
+
+                    def do_clear():
+                        table, msg = clear_index()
+                        return table, msg, []
+
+                    doc_table.select(on_select, [selected_rows_state], [selected_rows_state])
+                    up_btn.click(do_upload, [file_up, vis_ret_dd], [up_msg, doc_table])
+                    ds_btn.click(index_hf_dataset, [ds_name, ds_textcol, ds_srccol], [ds_msg, doc_table])
+                    refresh_btn.click(get_doc_table, outputs=[doc_table])
+                    delete_sel_btn.click(do_delete, [selected_rows_state, doc_table], [doc_table, action_msg, selected_rows_state])
+                    clear_all_btn.click(do_clear, outputs=[doc_table, action_msg, selected_rows_state])
+
+                # ── Tab 5: About ───────────────────────────────────────
+                with gr.Tab(l["tab_about"]):
+                    gr.Markdown(l["about_tabs_title"])
+                    gr.Markdown(l["about_tabs_desc"])
+                    gr.Markdown(l["about_arch_title"])
+                    gr.Markdown(l["about_arch_desc"])
+                    gr.Markdown(l["about_speed_title"].format(device=DEVICE.upper()))
+                    gr.Markdown(l["about_speed_desc"])
+
+            gr.Textbox(value=get_index_stats(lang_key), interactive=False, show_label=False, elem_classes=["status-bar"])
 
         # --- Language Switcher Logic ---
         def handle_lang_change(lang_name):
-            lang_key = "kh" if lang_name == "Khmer" else "en"
-            return update_ui_elements(lang_key)
+            return "kh" if lang_name == "Khmer" else "en"
 
-        # Shared output list — must exactly match what update_ui_elements() returns (40 items)
-        _lang_outputs = [
-            # Header
-            header_title, header_sub,
-            # General Chat
-            gen_desc, msg_gen, send_gen, model_dd_gen, reload_gen, clear_gen,
-            # RAG Chat
-            rag_desc, msg_rag, send_rag, model_dd_rag, reload_rag, clear_rag,
-            # Vision Chat
-            vis_desc, msg_vis, send_vis, vlm_dd, vis_rag_chk, load_vlm_btn, clear_vis,
-            # Knowledge Base
-            file_up, vis_ret_dd, up_btn, up_msg,
-            ds_name, ds_textcol, ds_srccol, ds_btn, ds_msg,
-            kb_md_sep, refresh_btn, delete_sel_btn, clear_all_btn,
-            # About
-            about_tabs_title_md, about_tabs_desc_md,
-            about_arch_title_md, about_arch_desc_md,
-            about_speed_title_md, about_speed_desc_md,
-        ]
-
-        lang_dropdown.change(handle_lang_change, [lang_dropdown], _lang_outputs)
-
-        # Initialize with Khmer on page load
-        demo.load(lambda: update_ui_elements("kh"), None, _lang_outputs)
+        lang_dropdown.change(handle_lang_change, [lang_dropdown], [lang_state])
 
         return demo
 
@@ -1245,4 +1290,5 @@ if __name__ == "__main__":
         share=False,
         inbrowser=True,
         theme=gr.themes.Soft(primary_hue="violet"),
+        css=CSS,
     )
