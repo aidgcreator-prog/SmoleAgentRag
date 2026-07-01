@@ -619,7 +619,7 @@ def transcribe_audio(audio_path: Optional[str], language: Optional[str] = None,
         if language and language != "auto":
             gen_kwargs["language"] = language
             gen_kwargs["task"] = "transcribe"
-        result = asr(audio_path, generate_kwargs=gen_kwargs or None)
+        result = asr(audio_path, generate_kwargs=gen_kwargs)
         text = result.get("text", "") if isinstance(result, dict) else str(result)
         return text.strip()
     except Exception as e:
