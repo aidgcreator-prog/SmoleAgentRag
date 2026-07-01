@@ -50,7 +50,6 @@ LANGUAGES = {
         "btn_load": "🔄 ទាញយក",
         "btn_clear": "🗑️ សម្អាត",
         "btn_index": "📥 បញ្ចូលឯកសារ",
-        "btn_load_ds": "⬇️ ទាញយក & បញ្ចូល",
         "btn_refresh": "🔄 បញ្ជូនឡើងវិញ",
         "btn_delete": "🗑️ លុបដែលបានជ្រើសរើស",
         "btn_clear_all": "💥 លុបទាំងអស់",
@@ -62,16 +61,11 @@ LANGUAGES = {
         "stt_audio_label": "ថត ឬបង្ហោះសំឡេង",
         "label_vis_rag": "🔍 ក៏ទាញយកបរិបទអត្ថបទផងដែរ",
         "label_vis_ret": "🖼️ អ្នកទាញយកចក្ខុវិស័យ (PDFs)",
-        "label_ds_name": "Dataset",
-        "label_ds_text": "Text col",
-        "label_ds_src": "Source col",
         "label_res": "លទ្ធផល",
         "doc_table_headers": ["ប្រភព", "ប្រភេទ", "ទំព័រ", "ចំនួន Chunk"],
         "label_kb_docs": "📋 ឯកសារដែលបានបញ្ចូល",
         "header_docs": "--- \n### 📋 ឯកសារដែលបានបញ្ចូល",
         "accordion_add": "📤 បន្ថែមឯកសារ",
-        "tab_upload": "បង្ហោះឯកសារ",
-        "tab_hf": "HuggingFace Dataset",
         "file_label": "ទម្លាក់ PDF / TXT / MD",
         "about_tabs_title": "## ផ្ទាំង",
         "about_tabs_desc": "| ផ្ទាំង | ការពិពណ៌នា |\n|---|---|\n| 💬 ការសន្ទនាទូទៅ | ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយក |\n| 📚 ការសន្ទនា RAG | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន រួចឆ្លើយ |\n| 🖼️ ការសន្ទនាចក្ខុវិស័យ | យល់ដឹងរូបភាព ជាមួយបរិបទអត្ថបទ |\n| 🎙️ និយាយទៅជាអក្សរ | បំលែងសំឡេងជាអក្សរ ដោយប្រើ Whisper |\n| 📂 មូលដ្ឋានចំណេះដឹង | បង្ហោះ និងគ្រប់គ្រងឯកសារ |",
@@ -134,7 +128,6 @@ LANGUAGES = {
         "btn_load": "🔄 Load",
         "btn_clear": "🗑️ Clear",
         "btn_index": "📥 Index files",
-        "btn_load_ds": "⬇️ Load & index",
         "btn_refresh": "🔄 Refresh",
         "btn_delete": "🗑️ Delete Selected",
         "btn_clear_all": "💥 Clear ALL",
@@ -146,16 +139,11 @@ LANGUAGES = {
         "stt_audio_label": "Record or upload audio",
         "label_vis_rag": "🔍 Also retrieve text context",
         "label_vis_ret": "🖼️ Visual retriever (PDFs)",
-        "label_ds_name": "Dataset",
-        "label_ds_text": "Text col",
-        "label_ds_src": "Source col",
         "label_res": "Result",
         "doc_table_headers": ["Source", "Type", "Pages", "Chunks"],
         "label_kb_docs": "📋 Indexed Documents",
         "header_docs": "--- \n### 📋 Indexed Documents",
         "accordion_add": "📤 Add Documents",
-        "tab_upload": "Upload Files",
-        "tab_hf": "HuggingFace Dataset",
         "file_label": "Drop PDF / TXT / MD",
         "about_tabs_title": "## Tabs",
         "about_tabs_desc": "| Tab | Description |\n|---|---|\n| 💬 General Chat | Direct LLM conversation — no retrieval |\n| 📚 RAG Chat | Retrieves from knowledge base first, then answers |\n| 🖼️ Vision Chat | Image understanding with optional text context |\n| 🎙️ Speech to Text | Transcribe audio into text using Whisper |\n| 📂 Knowledge Base | Upload & manage indexed documents |",
@@ -619,7 +607,31 @@ def transcribe_audio(audio_path: Optional[str], language: Optional[str] = None,
         if language and language != "auto":
             gen_kwargs["language"] = language
             gen_kwargs["task"] = "transcribe"
-        result = asr(audio_path, generate_kwargs=gen_kwargs)
+
+        # Decode the audio file ourselves via soundfile/librosa (both already
+        # in requirements.txt) instead of handing transformers a raw filepath,
+        # which requires ffmpeg to be separately installed and on PATH.
+        import numpy as np
+        target_sr = getattr(getattr(asr, "feature_extractor", None), "sampling_rate", 16000)
+
+        try:
+            import soundfile as sf
+            audio_array, src_sr = sf.read(audio_path, dtype="float32", always_2d=False)
+        except Exception:
+            import librosa
+            audio_array, src_sr = librosa.load(audio_path, sr=None, mono=False)
+
+        audio_array = np.asarray(audio_array, dtype="float32")
+        if audio_array.ndim == 2:
+            # Collapse multi-channel audio to mono (channel axis is whichever is smaller)
+            channel_axis = 0 if audio_array.shape[0] < audio_array.shape[1] else 1
+            audio_array = audio_array.mean(axis=channel_axis).astype("float32")
+
+        if src_sr != target_sr:
+            import librosa
+            audio_array = librosa.resample(audio_array, orig_sr=src_sr, target_sr=target_sr)
+
+        result = asr({"array": audio_array, "sampling_rate": target_sr}, generate_kwargs=gen_kwargs)
         text = result.get("text", "") if isinstance(result, dict) else str(result)
         return text.strip()
     except Exception as e:
@@ -1143,19 +1155,10 @@ def build_ui():
             # ── Tab 5: Knowledge Base ─────────────────────────────
             with gr.Tab(L["tab_kb"]) as tab_kb:
                 with gr.Accordion(L["accordion_add"], open=True) as acc_add:
-                    with gr.Tabs():
-                        with gr.Tab(L["tab_upload"]) as tab_upload:
-                            file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md"], file_count="multiple")
-                            vis_ret_dd = gr.Dropdown(choices=list(VISUAL_RETRIEVER_OPTIONS.keys()), value=list(VISUAL_RETRIEVER_OPTIONS.keys())[0], label=L["label_vis_ret"])
-                            up_btn     = gr.Button(L["btn_index"], variant="primary")
-                            up_msg     = gr.Textbox(label=L["label_res"], interactive=False, lines=4)
-                        with gr.Tab(L["tab_hf"]) as tab_hf:
-                            with gr.Row():
-                                ds_name    = gr.Textbox(label=L["label_ds_name"], value="m-ric/huggingface_doc", scale=3)
-                                ds_textcol = gr.Textbox(label=L["label_ds_text"], value="text", scale=1)
-                                ds_srccol  = gr.Textbox(label=L["label_ds_src"], value="source", scale=1)
-                            ds_btn = gr.Button(L["btn_load_ds"], variant="secondary")
-                            ds_msg = gr.Textbox(label=L["label_res"], interactive=False, lines=2)
+                    file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md"], file_count="multiple")
+                    vis_ret_dd = gr.Dropdown(choices=list(VISUAL_RETRIEVER_OPTIONS.keys()), value=list(VISUAL_RETRIEVER_OPTIONS.keys())[0], label=L["label_vis_ret"])
+                    up_btn     = gr.Button(L["btn_index"], variant="primary")
+                    up_msg     = gr.Textbox(label=L["label_res"], interactive=False, lines=4)
 
                 kb_header = gr.Markdown(L["header_docs"])
                 doc_table = gr.Dataframe(
@@ -1272,7 +1275,6 @@ def build_ui():
 
         doc_table.select(on_select,        [selected_rows_state], [selected_rows_state])
         up_btn.click(do_upload,            [file_up, vis_ret_dd], [up_msg, doc_table])
-        ds_btn.click(index_hf_dataset,     [ds_name, ds_textcol, ds_srccol], [ds_msg, doc_table])
         refresh_btn.click(get_doc_table,   outputs=[doc_table])
         delete_sel_btn.click(do_delete,    [selected_rows_state, doc_table], [doc_table, action_msg, selected_rows_state])
         clear_all_btn.click(do_clear,      outputs=[doc_table, action_msg, selected_rows_state])
@@ -1321,11 +1323,6 @@ def build_ui():
                 gr.update(label=l["label_vis_ret"]),
                 gr.update(value=l["btn_index"]),
                 gr.update(label=l["label_res"]),
-                gr.update(label=l["label_ds_name"]),
-                gr.update(label=l["label_ds_text"]),
-                gr.update(label=l["label_ds_src"]),
-                gr.update(value=l["btn_load_ds"]),
-                gr.update(label=l["label_res"]),
                 gr.update(value=l["header_docs"]),
                 gr.update(value=l["btn_refresh"]),
                 gr.update(value=l["btn_delete"]),
@@ -1353,7 +1350,6 @@ def build_ui():
             stt_desc, stt_audio, stt_dd, stt_lang_dd, load_stt_btn, transcribe_btn, stt_output,
             # Knowledge Base
             file_up, vis_ret_dd, up_btn, up_msg,
-            ds_name, ds_textcol, ds_srccol, ds_btn, ds_msg,
             kb_header, refresh_btn, delete_sel_btn, clear_all_btn,
             # About
             about_tabs_title_md, about_tabs_desc_md,

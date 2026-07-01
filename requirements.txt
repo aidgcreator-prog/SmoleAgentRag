@@ -36,3 +36,4 @@ gradio>=4.40.0
 
 
 filelock<3.17
+librosa
