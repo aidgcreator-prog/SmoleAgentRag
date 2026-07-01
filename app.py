@@ -30,9 +30,11 @@ from PIL import Image
 # Localization (i18n)
 # ──────────────────────────────────────────────────────────────────
 LANGUAGES = {
-    "kh": {
-        "title": "🔍 ភ្នាក់ងារ RAG",
-        "subtitle": "smolagents · ChromaDB · Gemma4 / Qwen3.6 · {device} · បង្កើតដោយ LocalAiLab",
+    "kh": {        
+        "title": """បង្កើតដោយ LocalAiLab ·
+        📺 <a href="https://youtube.com/@localailabkh" target="_blank">LocalAiLab យូធូបឆាណែល</a>
+        """,
+        "subtitle": "🔍 ភ្នាក់ងារ AI",
         "tab_general": "💬 ការសន្ទនាទូទៅ",
         "tab_general_desc": "ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយកទិន្នន័យឡើយ។",
         "tab_rag": "📚 ការសន្ទនា RAG",
@@ -67,7 +69,9 @@ LANGUAGES = {
         "header_docs": "--- \n### 📋 ឯកសារដែលបានបញ្ចូល",
         "accordion_add": "📤 បន្ថែមឯកសារ",
         "file_label": "ទម្លាក់ PDF / TXT / MD",
-        "about_tabs_title": "## ផ្ទាំង",
+        "about_tabs_title": """បង្កើតដោយ LocalAiLab ·
+        📺 <a href="https://youtube.com/@localailabkh" target="_blank">LocalAiLab យូធូបឆាណែល</a>
+        """,
         "about_tabs_desc": "| ផ្ទាំង | ការពិពណ៌នា |\n|---|---|\n| 💬 ការសន្ទនាទូទៅ | ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយក |\n| 📚 ការសន្ទនា RAG | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន រួចឆ្លើយ |\n| 🖼️ ការសន្ទនាចក្ខុវិស័យ | យល់ដឹងរូបភាព ជាមួយបរិបទអត្ថបទ |\n| 🎙️ និយាយទៅជាអក្សរ | បំលែងសំឡេងជាអក្សរ ដោយប្រើ Whisper |\n| 📂 មូលដ្ឋានចំណេះដឹង | បង្ហោះ និងគ្រប់គ្រងឯកសារ |",
         "about_arch_title": "## ស្ថាបត្យកម្ម",
         "about_arch_desc": "| សមាសធាតុ | លម្អិត |\n|---|---|",
