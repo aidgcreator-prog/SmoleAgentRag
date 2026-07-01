@@ -1050,10 +1050,13 @@ def fix_system_ui_generator():
 
 
 def build_ui():
+    # Start with Khmer as default
+    L = LANGUAGES["kh"]
+
     with gr.Blocks(title="🔍 RAG Agent") as demo:
         lang_state = gr.State("kh")
 
-        # Header
+        # ── Header ────────────────────────────────────────────────
         with gr.Row():
             with gr.Column(scale=8):
                 with gr.Row():
@@ -1064,221 +1067,308 @@ def build_ui():
                                 f'class="dev-logo" alt="{DEVELOPER_NAME} logo" />'
                             )
                     with gr.Column():
-                        header_title = gr.HTML()
-                        header_sub = gr.HTML()
+                        header_title = gr.HTML(
+                            f'<div class="header-wrap"><span class="header-title">{L["title"]}</span></div>'
+                        )
+                        header_sub = gr.HTML(
+                            f'<div class="header-wrap"><span class="header-sub">'
+                            f'{L["subtitle"].format(device=DEVICE.upper())}</span></div>'
+                        )
             with gr.Column(scale=2, variant="panel"):
                 lang_dropdown = gr.Dropdown(
-                    choices=["Khmer", "English"],
-                    value="Khmer",
-                    label="🌐 Language",
-                    scale=1
+                    choices=["Khmer", "English"], value="Khmer",
+                    label="🌐 Language", scale=1
                 )
 
-        @gr.render(inputs=[lang_state])
-        def render_body(lang_key):
-            l = LANGUAGES[lang_key]
+        # ── Tabs ──────────────────────────────────────────────────
+        with gr.Tabs():
 
-            header_title.value = f'<div class="header-wrap"><span class="header-title">{l["title"]}</span></div>'
-            header_sub.value   = f'<div class="header-wrap"><span class="header-sub">{l["subtitle"].format(device=DEVICE.upper())}</span></div>'
+            # ── Tab 1: General Chat ───────────────────────────────
+            with gr.Tab(L["tab_general"]) as tab_gen:
+                gen_desc    = gr.Markdown(L["tab_general_desc"])
+                bot_gen     = gr.Chatbot(height=440)
+                with gr.Row():
+                    msg_gen  = gr.Textbox(placeholder=L["placeholder_gen"], show_label=False, scale=8)
+                    send_gen = gr.Button(L["btn_send"], variant="primary", scale=1)
+                with gr.Row():
+                    model_dd_gen   = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label=L["label_llm"], scale=6)
+                    reload_gen     = gr.Button(L["btn_load"], size="sm", scale=2)
+                    reload_gen_out = gr.Textbox(show_label=False, interactive=False, scale=4)
+                clear_gen = gr.Button(L["btn_clear"], size="sm")
 
-            with gr.Tabs():
+            # ── Tab 2: RAG Chat ───────────────────────────────────
+            with gr.Tab(L["tab_rag"]) as tab_rag:
+                rag_desc    = gr.Markdown(L["tab_rag_desc"])
+                bot_rag     = gr.Chatbot(height=440)
+                with gr.Row():
+                    msg_rag  = gr.Textbox(placeholder=L["placeholder_rag"], show_label=False, scale=8)
+                    send_rag = gr.Button(L["btn_send"], variant="primary", scale=1)
+                with gr.Row():
+                    model_dd_rag   = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label=L["label_llm"], scale=6)
+                    reload_rag     = gr.Button(L["btn_load"], size="sm", scale=2)
+                    reload_rag_out = gr.Textbox(show_label=False, interactive=False, scale=4)
+                clear_rag = gr.Button(L["btn_clear"], size="sm")
 
-                # ── Tab 1: General Chat ────────────────────────────────
-                with gr.Tab(l["tab_general"]):
-                    gr.Markdown(l["tab_general_desc"])
-                    bot_gen = gr.Chatbot(label=l["tab_general"], height=440)
-                    with gr.Row():
-                        msg_gen  = gr.Textbox(placeholder=l["placeholder_gen"], show_label=False, scale=8)
-                        send_gen = gr.Button(l["btn_send"], variant="primary", scale=1)
-                    with gr.Row():
-                        model_dd_gen = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label=l["label_llm"], scale=6)
-                        reload_gen   = gr.Button(l["btn_load"], size="sm", scale=2)
-                        reload_gen_out = gr.Textbox(show_label=False, interactive=False, scale=4)
-                    clear_gen = gr.Button(l["btn_clear"], size="sm")
+            # ── Tab 3: Vision Chat ────────────────────────────────
+            with gr.Tab(L["tab_vision"]) as tab_vis:
+                vis_desc    = gr.Markdown(L["tab_vision_desc"])
+                bot_vis     = gr.Chatbot(height=400)
+                with gr.Row():
+                    msg_vis    = gr.Textbox(placeholder=L["placeholder_vis"], show_label=False, scale=6)
+                    img_upload = gr.Image(type="pil", sources=["upload", "clipboard"], scale=2)
+                    send_vis   = gr.Button(L["btn_send"], variant="primary", scale=1)
+                with gr.Row():
+                    vlm_dd       = gr.Dropdown(choices=list(VLM_OPTIONS.keys()), value=DEFAULT_VLM_LABEL, label=L["label_vlm"], scale=5)
+                    vis_rag_chk  = gr.Checkbox(label=L["label_vis_rag"], value=True, scale=2)
+                    load_vlm_btn = gr.Button(L["btn_load"], size="sm", scale=2)
+                    load_vlm_out = gr.Textbox(show_label=False, interactive=False, scale=3)
+                clear_vis = gr.Button(L["btn_clear"], size="sm")
 
-                    def reload_gen_fn(label):
-                        global _llm; _llm = None
-                        mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
-                        try:
-                            get_llm(mid); return f"✅ '{mid}' loaded"
-                        except Exception as e:
-                            return f"❌ {e}"
-
-                    msg_gen.submit(chat_general, [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
-                    send_gen.click(chat_general, [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
-                    clear_gen.click(lambda: ([], ""), outputs=[bot_gen, msg_gen])
-                    reload_gen.click(reload_gen_fn, [model_dd_gen], [reload_gen_out])
-
-                # ── Tab 2: RAG Chat ────────────────────────────────────
-                with gr.Tab(l["tab_rag"]):
-                    gr.Markdown(l["tab_rag_desc"])
-                    bot_rag = gr.Chatbot(label=l["tab_rag"], height=440)
-                    with gr.Row():
-                        msg_rag  = gr.Textbox(placeholder=l["placeholder_rag"], show_label=False, scale=8)
-                        send_rag = gr.Button(l["btn_send"], variant="primary", scale=1)
-                    with gr.Row():
-                        model_dd_rag = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label=l["label_llm"], scale=6)
-                        reload_rag   = gr.Button(l["btn_load"], size="sm", scale=2)
-                        reload_rag_out = gr.Textbox(show_label=False, interactive=False, scale=4)
-                    clear_rag = gr.Button(l["btn_clear"], size="sm")
-
-                    def reload_rag_fn(label):
-                        global _llm; _llm = None
-                        mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
-                        try:
-                            get_llm(mid); return f"✅ '{mid}' loaded"
-                        except Exception as e:
-                            return f"❌ {e}"
-
-                    msg_rag.submit(chat_rag, [msg_rag, bot_rag, model_dd_rag], [bot_rag, msg_rag])
-                    send_rag.click(chat_rag, [msg_rag, bot_rag, model_dd_rag], [bot_rag, msg_rag])
-                    clear_rag.click(lambda: ([], ""), outputs=[bot_rag, msg_rag])
-                    reload_rag.click(reload_rag_fn, [model_dd_rag], [reload_rag_out])
-
-                # ── Tab 3: Vision Chat ─────────────────────────────────
-                with gr.Tab(l["tab_vision"]):
-                    gr.Markdown(l["tab_vision_desc"])
-                    bot_vis = gr.Chatbot(label=l["tab_vision"], height=400)
-                    with gr.Row():
-                        msg_vis    = gr.Textbox(placeholder=l["placeholder_vis"], show_label=False, scale=6)
-                        img_upload = gr.Image(label=l["tab_vision"], type="pil", sources=["upload", "clipboard"], scale=2)
-                        send_vis   = gr.Button(l["btn_send"], variant="primary", scale=1)
-                    with gr.Row():
-                        vlm_dd       = gr.Dropdown(choices=list(VLM_OPTIONS.keys()), value=DEFAULT_VLM_LABEL, label=l["label_vlm"], scale=5)
-                        vis_rag_chk  = gr.Checkbox(label=l["label_vis_rag"], value=True, scale=2)
-                        load_vlm_btn = gr.Button(l["btn_load"], size="sm", scale=2)
-                        load_vlm_out = gr.Textbox(show_label=False, interactive=False, scale=3)
-                    clear_vis = gr.Button(l["btn_clear"], size="sm")
-
-                    def load_vlm_fn(label):
-                        global _vlm_model, _vlm_processor
-                        _vlm_model = _vlm_processor = None
-                        mid = VLM_OPTIONS.get(label, DEFAULT_VLM_MODEL)
-                        try:
-                            get_vlm(mid); return f"✅ '{mid}' loaded"
-                        except Exception as e:
-                            return f"❌ {e}"
-
-                    send_vis.click(chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
-                    msg_vis.submit(chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
-                    clear_vis.click(lambda: ([], None), outputs=[bot_vis, img_upload])
-                    load_vlm_btn.click(load_vlm_fn, [vlm_dd], [load_vlm_out])
-
-                # ── Tab 4: Speech to Text ───────────────────────────────
-                with gr.Tab(l["tab_stt"]):
-                    gr.Markdown(l["tab_stt_desc"])
-                    stt_audio = gr.Audio(label=l["stt_audio_label"], sources=["microphone", "upload"], type="filepath")
-                    with gr.Row():
-                        stt_dd      = gr.Dropdown(choices=list(STT_OPTIONS.keys()), value=DEFAULT_STT_LABEL, label=l["label_stt"], scale=5)
-                        stt_lang_dd = gr.Dropdown(
-                            choices=[("Auto-detect", "auto"), ("English", "english"), ("Khmer", "khmer"),
-                                     ("French", "french"), ("Chinese", "chinese"), ("Japanese", "japanese")],
-                            value="auto", label=l["label_stt_lang"], scale=3,
-                        )
-                        load_stt_btn = gr.Button(l["btn_load"], size="sm", scale=2)
-                        load_stt_out = gr.Textbox(show_label=False, interactive=False, scale=3)
-                    transcribe_btn = gr.Button(l["btn_transcribe"], variant="primary")
-                    stt_output = gr.Textbox(label=l["label_res"], lines=8, interactive=True)
-
-                    def load_stt_fn(label):
-                        global _stt_pipeline, _stt_model_id
-                        _stt_pipeline = None
-                        _stt_model_id = None
-                        mid = STT_OPTIONS.get(label, DEFAULT_STT_MODEL)
-                        try:
-                            get_stt_pipeline(mid); return f"✅ '{mid}' loaded"
-                        except Exception as e:
-                            return f"❌ {e}"
-
-                    def do_transcribe(audio_path, stt_label, lang_choice):
-                        mid = STT_OPTIONS.get(stt_label, DEFAULT_STT_MODEL)
-                        return transcribe_audio(audio_path, language=lang_choice, model_id=mid)
-
-                    transcribe_btn.click(do_transcribe, [stt_audio, stt_dd, stt_lang_dd], [stt_output])
-                    load_stt_btn.click(load_stt_fn, [stt_dd], [load_stt_out])
-
-                # ── Tab 5: Knowledge Base ──────────────────────────────
-                with gr.Tab(l["tab_kb"]):
-                    with gr.Accordion(l["accordion_add"], open=True):
-                        with gr.Tabs():
-                            with gr.Tab(l["tab_upload"]):
-                                file_up    = gr.File(label=l["file_label"], file_types=[".pdf", ".txt", ".md"], file_count="multiple")
-                                vis_ret_dd = gr.Dropdown(choices=list(VISUAL_RETRIEVER_OPTIONS.keys()), value=list(VISUAL_RETRIEVER_OPTIONS.keys())[0], label=l["label_vis_ret"])
-                                up_btn = gr.Button(l["btn_index"], variant="primary")
-                                up_msg = gr.Textbox(label=l["label_res"], interactive=False, lines=4)
-
-                            with gr.Tab(l["tab_hf"]):
-                                with gr.Row():
-                                    ds_name    = gr.Textbox(label=l["label_ds_name"], value="m-ric/huggingface_doc", scale=3)
-                                    ds_textcol = gr.Textbox(label=l["label_ds_text"], value="text", scale=1)
-                                    ds_srccol  = gr.Textbox(label=l["label_ds_src"], value="source", scale=1)
-                                ds_btn = gr.Button(l["btn_load_ds"], variant="secondary")
-                                ds_msg = gr.Textbox(label=l["label_res"], interactive=False, lines=2)
-
-                    gr.Markdown(l["header_docs"])
-                    doc_table = gr.Dataframe(
-                        headers=l["doc_table_headers"],
-                        datatype=["str", "str", "str", "number"],
-                        value=get_doc_table,
-                        interactive=True, wrap=True,
+            # ── Tab 4: Speech to Text ─────────────────────────────
+            with gr.Tab(L["tab_stt"]) as tab_stt:
+                stt_desc  = gr.Markdown(L["tab_stt_desc"])
+                stt_audio = gr.Audio(label=L["stt_audio_label"], sources=["microphone", "upload"], type="filepath")
+                with gr.Row():
+                    stt_dd      = gr.Dropdown(choices=list(STT_OPTIONS.keys()), value=DEFAULT_STT_LABEL, label=L["label_stt"], scale=5)
+                    stt_lang_dd = gr.Dropdown(
+                        choices=[("Auto-detect", "auto"), ("English", "english"), ("Khmer", "khmer"),
+                                 ("French", "french"), ("Chinese", "chinese"), ("Japanese", "japanese")],
+                        value="auto", label=L["label_stt_lang"], scale=3,
                     )
-                    with gr.Row():
-                        refresh_btn    = gr.Button(l["btn_refresh"], size="sm", scale=2)
-                        delete_sel_btn = gr.Button(l["btn_delete"], variant="stop", size="sm", scale=2)
-                        clear_all_btn  = gr.Button(l["btn_clear_all"], variant="stop", size="sm", scale=2)
-                    action_msg = gr.Textbox(label="", interactive=False, lines=1)
-                    selected_rows_state = gr.State([])
+                    load_stt_btn = gr.Button(L["btn_load"], size="sm", scale=2)
+                    load_stt_out = gr.Textbox(show_label=False, interactive=False, scale=3)
+                transcribe_btn = gr.Button(L["btn_transcribe"], variant="primary")
+                stt_output     = gr.Textbox(label=L["label_res"], lines=8, interactive=True)
 
-                    def on_select(evt: gr.SelectData, current):
-                        row = evt.index[0]
-                        if row in current: current.remove(row)
-                        else:              current.append(row)
-                        return current
+            # ── Tab 5: Knowledge Base ─────────────────────────────
+            with gr.Tab(L["tab_kb"]) as tab_kb:
+                with gr.Accordion(L["accordion_add"], open=True) as acc_add:
+                    with gr.Tabs():
+                        with gr.Tab(L["tab_upload"]) as tab_upload:
+                            file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md"], file_count="multiple")
+                            vis_ret_dd = gr.Dropdown(choices=list(VISUAL_RETRIEVER_OPTIONS.keys()), value=list(VISUAL_RETRIEVER_OPTIONS.keys())[0], label=L["label_vis_ret"])
+                            up_btn     = gr.Button(L["btn_index"], variant="primary")
+                            up_msg     = gr.Textbox(label=L["label_res"], interactive=False, lines=4)
+                        with gr.Tab(L["tab_hf"]) as tab_hf:
+                            with gr.Row():
+                                ds_name    = gr.Textbox(label=L["label_ds_name"], value="m-ric/huggingface_doc", scale=3)
+                                ds_textcol = gr.Textbox(label=L["label_ds_text"], value="text", scale=1)
+                                ds_srccol  = gr.Textbox(label=L["label_ds_src"], value="source", scale=1)
+                            ds_btn = gr.Button(L["btn_load_ds"], variant="secondary")
+                            ds_msg = gr.Textbox(label=L["label_res"], interactive=False, lines=2)
 
-                    def do_upload(files, vis_ret_label):
-                        import traceback
-                        try:
-                            return index_uploaded_files(files, vis_ret_label), get_doc_table()
-                        except Exception as e:
-                            return f"❌ {traceback.format_exc()}", get_doc_table()
+                kb_header = gr.Markdown(L["header_docs"])
+                doc_table = gr.Dataframe(
+                    headers=L["doc_table_headers"],
+                    datatype=["str","str","str","number"],
+                    value=get_doc_table,
+                    interactive=True, wrap=True,
+                )
+                with gr.Row():
+                    refresh_btn    = gr.Button(L["btn_refresh"], size="sm", scale=2)
+                    delete_sel_btn = gr.Button(L["btn_delete"], variant="stop", size="sm", scale=2)
+                    clear_all_btn  = gr.Button(L["btn_clear_all"], variant="stop", size="sm", scale=2)
+                action_msg         = gr.Textbox(label="", interactive=False, lines=1)
+                selected_rows_state = gr.State([])
 
-                    def do_delete(selected, table_data):
-                        rows = (table_data if isinstance(table_data, list)
-                                else table_data.values.tolist())
-                        new_table, msg = delete_selected_sources(selected, rows)
-                        return new_table, msg, []
+            # ── Tab 6: About ──────────────────────────────────────
+            with gr.Tab(L["tab_about"]) as tab_about:
+                about_tabs_title_md  = gr.Markdown(L["about_tabs_title"])
+                about_tabs_desc_md   = gr.Markdown(L["about_tabs_desc"])
+                about_arch_title_md  = gr.Markdown(L["about_arch_title"])
+                about_arch_desc_md   = gr.Markdown(L["about_arch_desc"])
+                about_speed_title_md = gr.Markdown(L["about_speed_title"].format(device=DEVICE.upper()))
+                about_speed_desc_md  = gr.Markdown(L["about_speed_desc"])
 
-                    def do_clear():
-                        table, msg = clear_index()
-                        return table, msg, []
+        status_bar = gr.Textbox(
+            value=get_index_stats("kh"), interactive=False,
+            show_label=False, elem_classes=["status-bar"]
+        )
 
-                    doc_table.select(on_select, [selected_rows_state], [selected_rows_state])
-                    up_btn.click(do_upload, [file_up, vis_ret_dd], [up_msg, doc_table])
-                    ds_btn.click(index_hf_dataset, [ds_name, ds_textcol, ds_srccol], [ds_msg, doc_table])
-                    refresh_btn.click(get_doc_table, outputs=[doc_table])
-                    delete_sel_btn.click(do_delete, [selected_rows_state, doc_table], [doc_table, action_msg, selected_rows_state])
-                    clear_all_btn.click(do_clear, outputs=[doc_table, action_msg, selected_rows_state])
+        # ── Event handlers ────────────────────────────────────────
 
-                # ── Tab 5: About ───────────────────────────────────────
-                with gr.Tab(l["tab_about"]):
-                    gr.Markdown(l["about_tabs_title"])
-                    gr.Markdown(l["about_tabs_desc"])
-                    gr.Markdown(l["about_arch_title"])
-                    gr.Markdown(l["about_arch_desc"])
-                    gr.Markdown(l["about_speed_title"].format(device=DEVICE.upper()))
-                    gr.Markdown(l["about_speed_desc"])
+        # General Chat
+        def reload_gen_fn(label):
+            global _llm; _llm = None
+            mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
+            try:
+                get_llm(mid); return f"✅ '{mid}' loaded"
+            except Exception as e:
+                return f"❌ {e}"
 
-            gr.Textbox(value=get_index_stats(lang_key), interactive=False, show_label=False, elem_classes=["status-bar"])
+        msg_gen.submit(chat_general,  [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
+        send_gen.click(chat_general,  [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
+        clear_gen.click(lambda: ([], ""), outputs=[bot_gen, msg_gen])
+        reload_gen.click(reload_gen_fn, [model_dd_gen], [reload_gen_out])
 
-        # --- Language Switcher Logic ---
-        def handle_lang_change(lang_name):
-            return "kh" if lang_name == "Khmer" else "en"
+        # RAG Chat
+        def reload_rag_fn(label):
+            global _llm; _llm = None
+            mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
+            try:
+                get_llm(mid); return f"✅ '{mid}' loaded"
+            except Exception as e:
+                return f"❌ {e}"
 
-        lang_dropdown.change(handle_lang_change, [lang_dropdown], [lang_state])
+        msg_rag.submit(chat_rag,  [msg_rag, bot_rag, model_dd_rag], [bot_rag, msg_rag])
+        send_rag.click(chat_rag,  [msg_rag, bot_rag, model_dd_rag], [bot_rag, msg_rag])
+        clear_rag.click(lambda: ([], ""), outputs=[bot_rag, msg_rag])
+        reload_rag.click(reload_rag_fn, [model_dd_rag], [reload_rag_out])
+
+        # Vision Chat
+        def load_vlm_fn(label):
+            global _vlm_model, _vlm_processor
+            _vlm_model = _vlm_processor = None
+            mid = VLM_OPTIONS.get(label, DEFAULT_VLM_MODEL)
+            try:
+                get_vlm(mid); return f"✅ '{mid}' loaded"
+            except Exception as e:
+                return f"❌ {e}"
+
+        send_vis.click(chat_vision,  [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
+        msg_vis.submit(chat_vision,  [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
+        clear_vis.click(lambda: ([], None), outputs=[bot_vis, img_upload])
+        load_vlm_btn.click(load_vlm_fn, [vlm_dd], [load_vlm_out])
+
+        # Speech to Text
+        def load_stt_fn(label):
+            global _stt_pipeline, _stt_model_id
+            _stt_pipeline = None; _stt_model_id = None
+            mid = STT_OPTIONS.get(label, DEFAULT_STT_MODEL)
+            try:
+                get_stt_pipeline(mid); return f"✅ '{mid}' loaded"
+            except Exception as e:
+                return f"❌ {e}"
+
+        def do_transcribe(audio_path, stt_label, lang_choice):
+            mid = STT_OPTIONS.get(stt_label, DEFAULT_STT_MODEL)
+            return transcribe_audio(audio_path, language=lang_choice, model_id=mid)
+
+        transcribe_btn.click(do_transcribe, [stt_audio, stt_dd, stt_lang_dd], [stt_output])
+        load_stt_btn.click(load_stt_fn, [stt_dd], [load_stt_out])
+
+        # Knowledge Base
+        def on_select(evt: gr.SelectData, current):
+            row = evt.index[0]
+            if row in current: current.remove(row)
+            else:              current.append(row)
+            return current
+
+        def do_upload(files, vis_ret_label):
+            import traceback
+            try:
+                return index_uploaded_files(files, vis_ret_label), get_doc_table()
+            except Exception as e:
+                return f"❌ {traceback.format_exc()}", get_doc_table()
+
+        def do_delete(selected, table_data):
+            rows = table_data if isinstance(table_data, list) else table_data.values.tolist()
+            new_table, msg = delete_selected_sources(selected, rows)
+            return new_table, msg, []
+
+        def do_clear():
+            table, msg = clear_index()
+            return table, msg, []
+
+        doc_table.select(on_select,        [selected_rows_state], [selected_rows_state])
+        up_btn.click(do_upload,            [file_up, vis_ret_dd], [up_msg, doc_table])
+        ds_btn.click(index_hf_dataset,     [ds_name, ds_textcol, ds_srccol], [ds_msg, doc_table])
+        refresh_btn.click(get_doc_table,   outputs=[doc_table])
+        delete_sel_btn.click(do_delete,    [selected_rows_state, doc_table], [doc_table, action_msg, selected_rows_state])
+        clear_all_btn.click(do_clear,      outputs=[doc_table, action_msg, selected_rows_state])
+
+        # ── Language switcher ─────────────────────────────────────
+        def switch_lang(lang_name):
+            lk = "kh" if lang_name == "Khmer" else "en"
+            l  = LANGUAGES[lk]
+            return (
+                lk,
+                # header
+                f'<div class="header-wrap"><span class="header-title">{l["title"]}</span></div>',
+                f'<div class="header-wrap"><span class="header-sub">{l["subtitle"].format(device=DEVICE.upper())}</span></div>',
+                # General Chat
+                gr.update(value=l["tab_general_desc"]),
+                gr.update(placeholder=l["placeholder_gen"]),
+                gr.update(value=l["btn_send"]),
+                gr.update(label=l["label_llm"]),
+                gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_clear"]),
+                # RAG Chat
+                gr.update(value=l["tab_rag_desc"]),
+                gr.update(placeholder=l["placeholder_rag"]),
+                gr.update(value=l["btn_send"]),
+                gr.update(label=l["label_llm"]),
+                gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_clear"]),
+                # Vision Chat
+                gr.update(value=l["tab_vision_desc"]),
+                gr.update(placeholder=l["placeholder_vis"]),
+                gr.update(value=l["btn_send"]),
+                gr.update(label=l["label_vlm"]),
+                gr.update(label=l["label_vis_rag"]),
+                gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_clear"]),
+                # STT
+                gr.update(value=l["tab_stt_desc"]),
+                gr.update(label=l["stt_audio_label"]),
+                gr.update(label=l["label_stt"]),
+                gr.update(label=l["label_stt_lang"]),
+                gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_transcribe"]),
+                gr.update(label=l["label_res"]),
+                # Knowledge Base
+                gr.update(label=l["file_label"]),
+                gr.update(label=l["label_vis_ret"]),
+                gr.update(value=l["btn_index"]),
+                gr.update(label=l["label_res"]),
+                gr.update(label=l["label_ds_name"]),
+                gr.update(label=l["label_ds_text"]),
+                gr.update(label=l["label_ds_src"]),
+                gr.update(value=l["btn_load_ds"]),
+                gr.update(label=l["label_res"]),
+                gr.update(value=l["header_docs"]),
+                gr.update(value=l["btn_refresh"]),
+                gr.update(value=l["btn_delete"]),
+                gr.update(value=l["btn_clear_all"]),
+                # About
+                gr.update(value=l["about_tabs_title"]),
+                gr.update(value=l["about_tabs_desc"]),
+                gr.update(value=l["about_arch_title"]),
+                gr.update(value=l["about_arch_desc"]),
+                gr.update(value=l["about_speed_title"].format(device=DEVICE.upper())),
+                gr.update(value=l["about_speed_desc"]),
+                # Status bar
+                get_index_stats(lk),
+            )
+
+        _lang_outputs = [
+            lang_state, header_title, header_sub,
+            # General Chat
+            gen_desc, msg_gen, send_gen, model_dd_gen, reload_gen, clear_gen,
+            # RAG Chat
+            rag_desc, msg_rag, send_rag, model_dd_rag, reload_rag, clear_rag,
+            # Vision Chat
+            vis_desc, msg_vis, send_vis, vlm_dd, vis_rag_chk, load_vlm_btn, clear_vis,
+            # STT
+            stt_desc, stt_audio, stt_dd, stt_lang_dd, load_stt_btn, transcribe_btn, stt_output,
+            # Knowledge Base
+            file_up, vis_ret_dd, up_btn, up_msg,
+            ds_name, ds_textcol, ds_srccol, ds_btn, ds_msg,
+            kb_header, refresh_btn, delete_sel_btn, clear_all_btn,
+            # About
+            about_tabs_title_md, about_tabs_desc_md,
+            about_arch_title_md, about_arch_desc_md,
+            about_speed_title_md, about_speed_desc_md,
+            # Status bar
+            status_bar,
+        ]
+
+        lang_dropdown.change(switch_lang, [lang_dropdown], _lang_outputs)
+
+        # Initialise to Khmer on load
+        demo.load(lambda: switch_lang("Khmer"), outputs=_lang_outputs)
 
         return demo
-
-
 if __name__ == "__main__":
     print("[RAG] Pre-loading embeddings and ChromaDB …")
     get_embed_model()

@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableDelayedExpansion
-title RAG Agent — Running
+title RAG Agent - Running
 color 0B
 
 echo.
 echo  ============================================================
-echo   RAG Agent — smolagents + ChromaDB + Gemma4 / Qwen3.6
+echo   RAG Agent - smolagents + ChromaDB + Gemma4 / Qwen3.6
 echo  ============================================================
 echo.
 
@@ -29,25 +29,34 @@ if not exist ".venv\Scripts\python.exe" (
 
 :: ── Activate venv ─────────────────────────────────────────────────────────────
 call ".venv\Scripts\activate.bat"
+if not exist ".venv\Scripts\activate.bat" (
+    echo  [WARN] .venv\Scripts\activate.bat not found - venv looks incomplete.
+    echo         The app will run against your SYSTEM Python instead of the venv.
+    echo         Fix: delete the .venv folder and re-run SETUP.bat
+    echo.
+)
 
 :: ── Show GPU info ─────────────────────────────────────────────────────────────
 echo  Hardware status:
+set NVIDIA_OK=0
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader 2>nul
-if %errorlevel% neq 0 (
+if !errorlevel! equ 0 set NVIDIA_OK=1
+
+if !NVIDIA_OK! equ 1 (
+    echo  (NVIDIA GPU detected)
+) else (
     wmic path win32_VideoController get name 2>nul | findstr /i "Radeon\|AMD" >nul
     if !errorlevel! equ 0 (
-        echo  (AMD GPU detected — ROCm support may be required)
+        echo  (AMD GPU detected - ROCm support may be required)
     ) else (
-        echo  (No NVIDIA/AMD GPU detected — running on CPU)
+        echo  (No NVIDIA/AMD GPU detected - running on CPU)
     )
-) else (
-    echo  (NVIDIA GPU detected)
 )
 
 :: ── Launch app ────────────────────────────────────────────────────────────────
 echo.
 echo  Starting RAG Agent...
-echo  Open your browser at:  http://localhost:7860
+echo  Open your browser at:  http://localhost:7861
 echo.
 echo  Press Ctrl+C to stop the app.
 echo  ============================================================
