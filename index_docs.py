@@ -29,7 +29,8 @@ def main():
     parser = argparse.ArgumentParser(description="Index documents into the RAG knowledge base.")
     parser.add_argument("--pdf",         help="Path to a PDF file to index")
     parser.add_argument("--txt",         help="Path to a TXT/MD file to index")
-    parser.add_argument("--dir",         help="Directory; indexes all .pdf / .txt / .md files inside")
+    parser.add_argument("--docx",        help="Path to a DOCX file to index")
+    parser.add_argument("--dir",         help="Directory; indexes all .pdf / .txt / .md / .docx files inside")
     parser.add_argument("--hf-dataset",  help="HuggingFace dataset name")
     parser.add_argument("--text-col",    default="text",   help="Column containing text (for HF datasets)")
     parser.add_argument("--source-col",  default="source", help="Column containing source name (optional)")
@@ -40,7 +41,7 @@ def main():
     # Import after argparse so --help is instant
     from app import (
         get_embed_model, get_chroma_collection, get_index_stats,
-        index_pdf_file, index_txt_file, index_hf_dataset, clear_index,
+        index_pdf_file, index_txt_file, index_docx_file, index_hf_dataset, clear_index,
     )
 
     # Pre-warm
@@ -65,6 +66,10 @@ def main():
         # index_txt_file returns a plain string
         print(index_txt_file(args.txt))
 
+    if args.docx:
+        # index_docx_file returns a plain string
+        print(index_docx_file(args.docx))
+
     if args.dir:
         folder = Path(args.dir)
         for f in sorted(folder.iterdir()):
@@ -72,6 +77,8 @@ def main():
                 print(index_pdf_file(str(f)))
             elif f.suffix.lower() in (".txt", ".md"):
                 print(index_txt_file(str(f)))
+            elif f.suffix.lower() == ".docx":
+                print(index_docx_file(str(f)))
 
     if args.hf_dataset:
         # index_hf_dataset returns (message_string, table_list)

@@ -29,6 +29,14 @@ from PIL import Image
 import base64
 from byaldi import RAGMultiModalModel
 
+# Optional: llama.cpp (GGUF) backend, alongside the HuggingFace/transformers backend.
+# If llama-cpp-python isn't installed, GGUF models simply won't show up in the dropdown.
+try:
+    from llama_cpp import Llama as LlamaCppBackend
+    LLAMA_CPP_AVAILABLE = True
+except ImportError:
+    LLAMA_CPP_AVAILABLE = False
+
 with open("image/logo.jpg", "rb") as f:
     logo_b64 = base64.b64encode(f.read()).decode()
 
@@ -92,16 +100,7 @@ LANGUAGES = {
         "label_kb_docs": "📋 ឯកសារដែលបានបញ្ចូល",
         "header_docs": "--- \n### 📋 ឯកសារដែលបានបញ្ចូល",
         "accordion_add": "📤 បន្ថែមឯកសារ",
-        "file_label": "ទម្លាក់ PDF / TXT / MD",
-        "about_version": "### 🔖 កំណែ {version}\nភ្នាក់ងារ RAG មូលដ្ឋាន ពហុភាសា (ខ្មែរ/អង់គ្លេស) និងពហុម៉ូដាល — សន្ទនាទូទៅ វិភាគឯកសារតាមរយៈ RAG យល់ដឹងរូបភាព បំលែងសំឡេងទៅជាអក្សរ វិភាគទិន្នន័យ CSV/Excel ដោយ AI Agent និងគ្រប់គ្រងមូលដ្ឋានចំណេះដឹង — ដំណើរការទាំងស្រុងនៅលើកុំព្យូទ័ររបស់អ្នក។",
-        "about_tabs_title": """បង្កើតដោយ LocalAiLab ·
-        📺 <a href="https://youtube.com/@localailabkh" target="_blank">LocalAiLab យូធូបឆាណែល</a>
-        """,
-        "about_tabs_desc": "| ផ្ទាំង | ការពិពណ៌នា |\n|---|---|\n| 💬 ការសន្ទនាទូទៅ | ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយក |\n| 📚 ការសន្ទនា RAG | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន រួចឆ្លើយ |\n| 🖼️ ការសន្ទនាចក្ខុវិស័យ | យល់ដឹងរូបភាព ជាមួយបរិបទអត្ថបទ |\n| 🎙️ និយាយទៅជាអក្សរ | បំលែងសំឡេងជាអក្សរ ដោយប្រើ Whisper |\n| 📊 វិភាគទិន្នន័យ | Agent វិភាគ CSV/Excel បង្កើតក្រាហ្វិក និងរបាយការណ៍ |\n| 📂 មូលដ្ឋានចំណេះដឹង | បង្ហោះ និងគ្រប់គ្រងឯកសារ |",
-        "about_arch_title": "## ស្ថាបត្យកម្ម",
-        "about_arch_desc": "| សមាសធាតុ | លម្អិត |\n|---|---|",
-        "about_speed_title": "## ល្បឿនរំពឹងទុក ({device})",
-        "about_speed_desc": "| កិច្ចការ | ពេលវេលា |\n|---|---|\n| បញ្ចូលឯកសារ | ១០–៦០ វិ |\n| ឆ្លើយបែប General / RAG | ១–៥ នាទី |\n| ឆ្លើយបែប Vision | ២–៨ នាទី |",
+        "file_label": "ទម្លាក់ PDF / TXT / MD / DOCX",
         "lang_label": "ភាសា",
         "lang_options": ["Khmer", "English"],
         "status_refreshed": "🔄 បញ្ជូនឡើងវិញនូវស្ថានភាព",
@@ -181,14 +180,7 @@ LANGUAGES = {
         "label_kb_docs": "📋 Indexed Documents",
         "header_docs": "--- \n### 📋 Indexed Documents",
         "accordion_add": "📤 Add Documents",
-        "file_label": "Drop PDF / TXT / MD",
-        "about_version": "### 🔖 Version {version}\nA local, bilingual (Khmer/English), multi-modal RAG agent — general chat, document RAG, vision chat, speech-to-text, AI-driven CSV/Excel data analysis, and knowledge base management — running entirely on your own machine.",
-        "about_tabs_title": "## Tabs",
-        "about_tabs_desc": "| Tab | Description |\n|---|---|\n| 💬 General Chat | Direct LLM conversation — no retrieval |\n| 📚 RAG Chat | Retrieves from knowledge base first, then answers |\n| 🖼️ Vision Chat | Image understanding with optional text context |\n| 🎙️ Speech to Text | Transcribe audio into text using Whisper |\n| 📊 Data Analysis | Agent analyzes CSV/Excel, builds charts and a report |\n| 📂 Knowledge Base | Upload & manage indexed documents |",
-        "about_arch_title": "## Architecture",
-        "about_arch_desc": "| Component | Detail |\n|---|---|",
-        "about_speed_title": "## Expected speed ({device})",
-        "about_speed_desc": "| Task | Time |\n|---|---|\n| Index a document | 10–60 s |\n| General / RAG answer | 1–5 min |\n| Vision answer | 2–8 min |",
+        "file_label": "Drop PDF / TXT / MD / DOCX",
         "lang_label": "Language",
         "lang_options": ["English", "Khmer"],
         "status_refreshed": "🔄 Status Refreshed",
@@ -340,6 +332,89 @@ class HardwareManager:
             yield f"❌ Error: {str(e)}", "cpu", f"❌ Error: {str(e)}"
 
 
+# ──────────────────────────────────────────────────────────────────
+# llama.cpp (GGUF) model backend
+# ──────────────────────────────────────────────────────────────────
+LLAMA_CPP_MODEL_DIR = r"I:\llama_cpp\llamaccp_models"
+
+
+def discover_gguf_models(folder: str = LLAMA_CPP_MODEL_DIR) -> dict:
+    """Scan a folder for .gguf files and return {label: path} entries
+    that can be merged straight into MODEL_OPTIONS."""
+    if not LLAMA_CPP_AVAILABLE:
+        return {}
+    p = Path(folder)
+    if not p.exists():
+        return {}
+    found = {}
+    for f in sorted(p.glob("*.gguf")):
+        size_gb = f.stat().st_size / (1024 ** 3)
+        label = f"🦙 {f.stem}  (~{size_gb:.1f} GB | llama.cpp)"
+        found[label] = str(f)
+    return found
+
+
+class LlamaCppModel:
+    """Minimal smolagents-compatible Model wrapper around llama-cpp-python.
+
+    Satisfies the smolagents Model contract: callable/`generate()` taking a
+    list of chat messages and returning an object with a `.content` attribute.
+    Lets .gguf models sit in the same MODEL_OPTIONS dropdown, and be passed
+    to smolagents' CodeAgent, as the HuggingFace TransformersModel entries.
+    """
+
+    def __init__(self, model_path: str, n_ctx: int = 4096,
+                 n_gpu_layers: int = -1, temperature: float = 0.6,
+                 top_p: float = 0.95, max_new_tokens: int = 512):
+        self.model_id = model_path
+        self.model_path = model_path
+        self.temperature = temperature
+        self.top_p = top_p
+        self.max_new_tokens = max_new_tokens
+        print(f"[llama.cpp] Loading '{model_path}' (n_gpu_layers={n_gpu_layers}) …")
+        self.llm = LlamaCppBackend(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,   # -1 = offload all layers if the build supports GPU
+            verbose=False,
+        )
+
+    @staticmethod
+    def _flatten_content(content) -> str:
+        if isinstance(content, list):
+            return " ".join(
+                c.get("text", "") if isinstance(c, dict) else str(c) for c in content
+            )
+        return str(content)
+
+    def _to_plain_messages(self, messages: list) -> list:
+        plain = []
+        for m in messages:
+            role = getattr(m, "role", None) or m.get("role")
+            content = getattr(m, "content", None)
+            if content is None:
+                content = m.get("content")
+            plain.append({"role": str(role), "content": self._flatten_content(content)})
+        return plain
+
+    def generate(self, messages: list, stop_sequences: Optional[list] = None, **kwargs):
+        from smolagents.models import ChatMessage
+        plain_messages = self._to_plain_messages(messages)
+        out = self.llm.create_chat_completion(
+            messages=plain_messages,
+            stop=stop_sequences or [],
+            max_tokens=kwargs.get("max_tokens", self.max_new_tokens),
+            temperature=kwargs.get("temperature", self.temperature),
+            top_p=kwargs.get("top_p", self.top_p),
+        )
+        text = out["choices"][0]["message"]["content"]
+        return ChatMessage(role="assistant", content=text)
+
+    # smolagents Model instances are called directly in some code paths
+    def __call__(self, messages: list, stop_sequences: Optional[list] = None, **kwargs):
+        return self.generate(messages, stop_sequences=stop_sequences, **kwargs)
+
+
 if torch.cuda.is_available():
     DEVICE = "cuda"
 elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -367,12 +442,115 @@ DEVELOPER_LOGO_B64 = _load_logo_b64()
 DEVELOPER_NAME = "LocalAiLab"
 APP_VERSION = "1.2.0-beta"
 
+# ──────────────────────────────────────────────────────────────────
+# About tab — always shown bilingually (Khmer first, English below),
+# independent of the language dropdown. Kept as static strings so it
+# stays accurate to the current tab order / feature set at a glance.
+# ──────────────────────────────────────────────────────────────────
+def _about_content_kh(device: str, version: str) -> str:
+    return f"""
+### 🔖 កំណែ {version}
+
+ភ្នាក់ងារ RAG មូលដ្ឋាន ពហុភាសា (ខ្មែរ/អង់គ្លេស) និងពហុម៉ូដាល — សន្ទនាទូទៅ វិភាគឯកសារតាមរយៈ RAG យល់ដឹងរូបភាព
+បំលែងសំឡេងទៅជាអក្សរ វិភាគទិន្នន័យ CSV/Excel ដោយ AI Agent និងគ្រប់គ្រងមូលដ្ឋានចំណេះដឹង — ដំណើរការទាំងស្រុងនៅលើកុំព្យូទ័ររបស់អ្នក
+ដោយប្រើម៉ូដែល HuggingFace (transformers) ឬម៉ូដែលមូលដ្ឋាន GGUF តាមរយៈ llama.cpp។
+
+---
+
+## ផ្ទាំង
+
+| ផ្ទាំង | ការពិពណ៌នា |
+|---|---|
+| 💬 ការសន្ទនាទូទៅ | ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយក |
+| 📚 ការសន្ទនា RAG | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន រួចឆ្លើយ |
+| 🖼️ ការសន្ទនាចក្ខុវិស័យ | យល់ដឹងរូបភាព ជាមួយបរិបទអត្ថបទ |
+| 🎙️ និយាយទៅជាអក្សរ | បំលែងសំឡេងជាអក្សរ ដោយប្រើ Whisper |
+| 📊 វិភាគទិន្នន័យ | Agent វិភាគ CSV/Excel បង្កើតក្រាហ្វិក និងរបាយការណ៍ |
+| 📂 មូលដ្ឋានចំណេះដឹង | បង្ហោះ (PDF / TXT / MD / DOCX) និងគ្រប់គ្រងឯកសារ |
+
+## ស្ថាបត្យកម្ម
+
+| សមាសធាតុ | លម្អិត |
+|---|---|
+| LLM | ម៉ូដែល HuggingFace (Qwen3, Gemma-4) **ឬ** ម៉ូដែល GGUF មូលដ្ឋានតាមរយៈ llama.cpp |
+| Vision LLM | SmolVLM / Qwen2.5-VL |
+| Speech-to-Text | Whisper (រួមទាំងម៉ូដែលដែលបានកែសម្រួលសម្រាប់ភាសាខ្មែរ) |
+| Embedding | BAAI/bge-m3 |
+| Vector store | ChromaDB (`./chroma_db/`) |
+| Visual Index | ColSmolVLM / ColQwen2 (`./visual_index/`) |
+| ប្រភេទឯកសារដែលបញ្ចូលបាន | PDF, TXT, MD, DOCX |
+| ប្រភេទភ្នាក់ងារ | `smolagents.CodeAgent` |
+| UI | Gradio |
+
+## ល្បឿនរំពឹងទុក ({device})
+
+| កិច្ចការ | ពេលវេលា |
+|---|---|
+| បញ្ចូលឯកសារ | ១០–៦០ វិ |
+| ឆ្លើយបែប General / RAG | ១–៥ នាទី |
+| ឆ្លើយបែប Vision | ២–៨ នាទី |
+
+> 💡 ម៉ូដែល GGUF (llama.cpp) ត្រូវបានស្កេនដោយស្វ័យប្រវត្តិពីថត `I:\\llama_cpp\\llamaccp_models` ហើយបង្ហាញនៅក្នុងបញ្ជីទម្លាក់ម៉ូដែលដូចគ្នានឹងម៉ូដែល HuggingFace។
+"""
+
+
+def _about_content_en(device: str, version: str) -> str:
+    return f"""
+### 🔖 Version {version}
+
+A local, bilingual (Khmer/English), multi-modal RAG agent — general chat, document RAG, vision chat, speech-to-text,
+AI-driven CSV/Excel data analysis, and knowledge base management — running entirely on your own machine, using either
+HuggingFace (transformers) models or local GGUF models via llama.cpp.
+
+---
+
+## Tabs
+
+| Tab | Description |
+|---|---|
+| 💬 General Chat | Direct LLM conversation — no retrieval |
+| 📚 RAG Chat | Retrieves from knowledge base first, then answers |
+| 🖼️ Vision Chat | Image understanding with optional text context |
+| 🎙️ Speech to Text | Transcribe audio into text using Whisper |
+| 📊 Data Analysis | Agent analyzes CSV/Excel, builds charts and a report |
+| 📂 Knowledge Base | Upload (PDF / TXT / MD / DOCX) & manage indexed documents |
+
+## Architecture
+
+| Component | Detail |
+|---|---|
+| LLM | HuggingFace models (Qwen3, Gemma-4) **or** local GGUF models via llama.cpp |
+| Vision LLM | SmolVLM / Qwen2.5-VL |
+| Speech-to-Text | Whisper (including Khmer-tuned variants) |
+| Embedding | BAAI/bge-m3 |
+| Vector store | ChromaDB (`./chroma_db/`) |
+| Visual Index | ColSmolVLM / ColQwen2 (`./visual_index/`) |
+| Supported document types | PDF, TXT, MD, DOCX |
+| Agent type | `smolagents.CodeAgent` |
+| UI | Gradio |
+
+## Expected speed ({device})
+
+| Task | Time |
+|---|---|
+| Index a document | 10–60 s |
+| General / RAG answer | 1–5 min |
+| Vision answer | 2–8 min |
+
+> 💡 GGUF (llama.cpp) models are auto-discovered from `I:\\llama_cpp\\llamaccp_models` and appear in the same model dropdown as the HuggingFace models.
+"""
+
 MODEL_OPTIONS = {
     "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)": "Qwen/Qwen3-0.6B",
     "🟡 Qwen3-1.7B   (~3 GB RAM)":             "Qwen/Qwen3-1.7B",
     "🟡 Qwen3-4B     (~7 GB RAM)":             "Qwen/Qwen3-4B",
     "🔵 Gemma-4-E2B  (~4 GB RAM)":             "google/gemma-4-E2B-it",
 }
+
+# Merge in any local .gguf models found under LLAMA_CPP_MODEL_DIR so they
+# appear in the same dropdowns as the HuggingFace/transformers models.
+MODEL_OPTIONS.update(discover_gguf_models())
+
 DEFAULT_LLM_LABEL = "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)"
 DEFAULT_LLM_MODEL = MODEL_OPTIONS[DEFAULT_LLM_LABEL]
 
@@ -478,17 +656,33 @@ def get_llm(model_id: Optional[str] = None):
         if _llm is not None and target == _llm_model_id:
             return _llm
 
-        from smolagents import TransformersModel
-        print(f"[RAG] Loading LLM '{target}' on {DEVICE.upper()} …")
-        _llm = TransformersModel(
-            model_id=target,
-            device_map=DEVICE,
-            torch_dtype=TORCH_DTYPE,
-            max_new_tokens=MAX_NEW_TOKENS,
-            temperature=0.6,
-            top_p=0.95,
-            trust_remote_code=True,
-        )
+        if str(target).lower().endswith(".gguf"):
+            if not LLAMA_CPP_AVAILABLE:
+                raise RuntimeError(
+                    "llama-cpp-python is not installed. Run "
+                    "'pip install llama-cpp-python' (with the appropriate "
+                    "CUDA/Metal build flags for GPU support) to use GGUF models."
+                )
+            _llm = LlamaCppModel(
+                model_path=target,
+                n_ctx=4096,
+                n_gpu_layers=-1,          # offload all layers if the build supports GPU
+                temperature=0.6,
+                top_p=0.95,
+                max_new_tokens=MAX_NEW_TOKENS,
+            )
+        else:
+            from smolagents import TransformersModel
+            print(f"[RAG] Loading LLM '{target}' on {DEVICE.upper()} …")
+            _llm = TransformersModel(
+                model_id=target,
+                device_map=DEVICE,
+                torch_dtype=TORCH_DTYPE,
+                max_new_tokens=MAX_NEW_TOKENS,
+                temperature=0.6,
+                top_p=0.95,
+                trust_remote_code=True,
+            )
         _llm_model_id = target
         return _llm
 
@@ -966,6 +1160,36 @@ def index_txt_file(filepath: str) -> str:
         return f"❌ {e}"
 
 
+def index_docx_file(filepath: str) -> str:
+    try:
+        import docx  # python-docx
+        document = docx.Document(filepath)
+
+        parts = []
+        # Paragraph text (skips empty lines)
+        for para in document.paragraphs:
+            if para.text.strip():
+                parts.append(para.text)
+
+        # Table text — tables aren't covered by document.paragraphs
+        for table in document.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                if cells:
+                    parts.append(" | ".join(cells))
+
+        text = "\n".join(parts)
+        if not text.strip():
+            return f"⚠️ No extractable text in '{Path(filepath).name}'"
+
+        k = index_texts([text], [{"source": Path(filepath).name, "type": "docx"}])
+        return f"✅ {k} chunks from '{Path(filepath).name}'"
+    except ImportError:
+        return "⚠️ python-docx not installed — run 'pip install python-docx' to index .docx files."
+    except Exception as e:
+        return f"❌ {e}"
+
+
 def _get_file_path(f) -> Optional[str]:
     if f is None:          return None
     if isinstance(f, str): return f
@@ -995,6 +1219,8 @@ def index_uploaded_files(files, visual_retriever_label: str) -> str:
             msgs.append(index_pdf_file(path, retriever_id))
         elif ext in (".txt", ".md"):
             msgs.append(index_txt_file(path))
+        elif ext == ".docx":
+            msgs.append(index_docx_file(path))
         else:
             msgs.append(f"⚠️ Unsupported: {ext}")
     return "\n".join(msgs) or "Nothing indexed."
@@ -1384,7 +1610,7 @@ def build_ui():
             # ── Tab 6: Knowledge Base ─────────────────────────────
             with gr.Tab(L["tab_kb"]) as tab_kb:
                 with gr.Accordion(L["accordion_add"], open=True) as acc_add:
-                    file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md"], file_count="multiple")
+                    file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md",".docx"], file_count="multiple")
                     vis_ret_dd = gr.Dropdown(choices=list(VISUAL_RETRIEVER_OPTIONS.keys()), value=list(VISUAL_RETRIEVER_OPTIONS.keys())[0], label=L["label_vis_ret"])
                     up_btn     = gr.Button(L["btn_index"], variant="primary")
                     up_msg     = gr.Textbox(label=L["label_res"], interactive=False, lines=4)
@@ -1405,13 +1631,9 @@ def build_ui():
 
             # ── Tab 7: About ──────────────────────────────────────
             with gr.Tab(L["tab_about"]) as tab_about:
-                about_version_md    = gr.Markdown(L["about_version"].format(version=APP_VERSION))
-                about_tabs_title_md  = gr.Markdown(L["about_tabs_title"])
-                about_tabs_desc_md   = gr.Markdown(L["about_tabs_desc"])
-                about_arch_title_md  = gr.Markdown(L["about_arch_title"])
-                about_arch_desc_md   = gr.Markdown(L["about_arch_desc"])
-                about_speed_title_md = gr.Markdown(L["about_speed_title"].format(device=DEVICE.upper()))
-                about_speed_desc_md  = gr.Markdown(L["about_speed_desc"])
+                about_md_kh = gr.Markdown(_about_content_kh(DEVICE.upper(), APP_VERSION))
+                gr.Markdown("---")
+                about_md_en = gr.Markdown(_about_content_en(DEVICE.upper(), APP_VERSION))
 
         status_bar = gr.Textbox(
             value=get_index_stats("kh"), interactive=False,
@@ -1587,14 +1809,6 @@ def build_ui():
                 gr.update(value=l["btn_refresh"]),
                 gr.update(value=l["btn_delete"]),
                 gr.update(value=l["btn_clear_all"]),
-                # About
-                gr.update(value=l["about_version"].format(version=APP_VERSION)),
-                gr.update(value=l["about_tabs_title"]),
-                gr.update(value=l["about_tabs_desc"]),
-                gr.update(value=l["about_arch_title"]),
-                gr.update(value=l["about_arch_desc"]),
-                gr.update(value=l["about_speed_title"].format(device=DEVICE.upper())),
-                gr.update(value=l["about_speed_desc"]),
                 # Status bar
                 get_index_stats(lk),
             )
@@ -1615,11 +1829,6 @@ def build_ui():
             # Knowledge Base
             file_up, vis_ret_dd, up_btn, up_msg,
             kb_header, refresh_btn, delete_sel_btn, clear_all_btn,
-            # About
-            about_version_md,
-            about_tabs_title_md, about_tabs_desc_md,
-            about_arch_title_md, about_arch_desc_md,
-            about_speed_title_md, about_speed_desc_md,
             # Status bar
             status_bar,
         ]
