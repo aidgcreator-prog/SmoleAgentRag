@@ -10,6 +10,7 @@ Tabs:
 """
 
 import os
+import gc
 import warnings
 import time
 import threading
@@ -842,6 +843,62 @@ _data_agent_model_id = None
 _data_agent_lock     = threading.Lock()
 
 
+def _release_model(obj):
+    """Explicitly free memory held by a model before dropping the last
+    Python reference to it.
+
+    Just setting a global cache variable to None does NOT free GPU/CPU
+    memory right away:
+      - transformers/torch models: the CUDA caching allocator keeps the
+        freed blocks around until torch.cuda.empty_cache() runs (and that
+        can only reclaim memory from tensors that have already been
+        garbage-collected).
+      - llama.cpp (llama-cpp-python) models: the native context / KV-cache
+        lives in a C++ object. Its Python wrapper's __del__ will eventually
+        close it, but only once the GC actually runs the finalizer — which
+        is not guaranteed to happen before the next model tries to load,
+        causing an OOM when switching models back-to-back.
+
+    Calling this before overwriting/loading a new model avoids the
+    "previous model didn't offload, so the next one fails to load" issue.
+    """
+    if obj is None:
+        return
+    try:
+        # llama.cpp backend: LlamaCppModel wraps the native llama_cpp.Llama
+        # instance as `.llm` — close it explicitly to free the KV-cache /
+        # context right now instead of waiting on GC.
+        inner = getattr(obj, "llm", None)
+        if inner is not None and hasattr(inner, "close"):
+            try:
+                inner.close()
+            except Exception:
+                pass
+
+        # transformers / smolagents TransformersModel: move the underlying
+        # nn.Module off the GPU before dropping it so CUDA's allocator can
+        # actually reclaim the memory once we empty_cache() below.
+        model_attr = getattr(obj, "model", None)
+        if model_attr is not None and hasattr(model_attr, "to"):
+            try:
+                model_attr.to("cpu")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    del obj
+    gc.collect()
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except Exception:
+        pass
+
+
 def get_embed_model():
     global _embed_model
     if _embed_model is None:
@@ -878,6 +935,11 @@ def get_llm(model_id: Optional[str] = None):
     with _llm_lock:
         if _llm is not None and target == _llm_model_id:
             return _llm
+
+        if _llm is not None:
+            print(f"[RAG] Unloading previous LLM '{_llm_model_id}' before loading '{target}' …")
+            _release_model(_llm)
+            _llm = None
 
         if str(target).lower().endswith(".gguf"):
             if not LLAMA_CPP_AVAILABLE:
@@ -947,6 +1009,12 @@ def get_vlm(model_id: Optional[str] = None):
 
     if _vlm_model is not None and target == _vlm_model_id:
         return _vlm_model, _vlm_processor
+
+    if _vlm_model is not None:
+        print(f"[VLM] Unloading previous VLM '{_vlm_model_id}' before loading '{target}' …")
+        _release_model(_vlm_model)
+        _vlm_model = None
+        _vlm_processor = None
 
     print(f"[VLM] Loading '{target}' on {DEVICE.upper()} …")
 
@@ -1051,6 +1119,11 @@ def get_stt_pipeline(model_id: Optional[str] = None):
     with _stt_lock:
         if _stt_pipeline is not None and target == _stt_model_id:
             return _stt_pipeline
+
+        if _stt_pipeline is not None:
+            print(f"[STT] Unloading previous STT model '{_stt_model_id}' before loading '{target}' …")
+            _release_model(_stt_pipeline)
+            _stt_pipeline = None
 
         print(f"[STT] Loading '{target}' on {DEVICE.upper()} …")
         from transformers import pipeline as hf_pipeline
@@ -1903,7 +1976,18 @@ def build_ui():
 
         # General Chat
         def reload_gen_fn(label):
-            global _llm; _llm = None
+            global _llm, _data_agent, _data_agent_model_id
+            # Free the current model's memory now, rather than just dropping
+            # the reference — otherwise the old model can still be occupying
+            # VRAM when we try to load the new one right below.
+            _release_model(_llm)
+            _llm = None
+            # The data-analysis agent holds its own reference to this same
+            # LLM instance — clear it too so it doesn't keep the old model
+            # (or its now-stale weights) alive, and rebuilds against the
+            # newly loaded one on next use.
+            _data_agent = None
+            _data_agent_model_id = None
             mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
             try:
                 get_llm(mid); return f"✅ '{mid}' loaded"
@@ -1917,7 +2001,11 @@ def build_ui():
 
         # RAG Chat
         def reload_rag_fn(label):
-            global _llm; _llm = None
+            global _llm, _data_agent, _data_agent_model_id
+            _release_model(_llm)
+            _llm = None
+            _data_agent = None
+            _data_agent_model_id = None
             mid = MODEL_OPTIONS.get(label, DEFAULT_LLM_MODEL)
             try:
                 get_llm(mid); return f"✅ '{mid}' loaded"
@@ -1932,6 +2020,7 @@ def build_ui():
         # Vision Chat
         def load_vlm_fn(label):
             global _vlm_model, _vlm_processor
+            _release_model(_vlm_model)
             _vlm_model = _vlm_processor = None
             mid = VLM_OPTIONS.get(label, DEFAULT_VLM_MODEL)
             try:
@@ -1947,6 +2036,7 @@ def build_ui():
         # Speech to Text
         def load_stt_fn(label):
             global _stt_pipeline, _stt_model_id
+            _release_model(_stt_pipeline)
             _stt_pipeline = None; _stt_model_id = None
             mid = STT_OPTIONS.get(label, DEFAULT_STT_MODEL)
             try:
@@ -1964,6 +2054,10 @@ def build_ui():
         # Data Analysis
         def reset_data_agent_fn():
             global _data_agent, _data_agent_model_id
+            # Just drop the CodeAgent wrapper here — it references the shared
+            # _llm managed by get_llm()/reload_gen_fn()/reload_rag_fn(), whose
+            # memory is released there when the underlying model actually
+            # changes. Rebuilding is cheap since it reuses get_llm(target).
             _data_agent = None
             _data_agent_model_id = None
             return "✅ Agent reset — will rebuild on next run."
