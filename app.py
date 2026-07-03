@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import platform
+import shutil
 from io import BytesIO
 from pathlib import Path
 from typing import Optional, Callable
@@ -25,25 +26,47 @@ from typing import Optional, Callable
 import gradio as gr
 import torch
 from PIL import Image
+import base64
+from byaldi import RAGMultiModalModel
+
+with open("image/logo.jpg", "rb") as f:
+    logo_b64 = base64.b64encode(f.read()).decode()
 
 # ──────────────────────────────────────────────────────────────────
 # Localization (i18n)
 # ──────────────────────────────────────────────────────────────────
 LANGUAGES = {
-    "kh": {        
-        "title": """បង្កើតដោយ LocalAiLab ·
-        📺 <a href="https://youtube.com/@localailabkh" target="_blank">LocalAiLab យូធូបឆាណែល</a>
+    "kh": {
+        "title": f"""
+        <div style="display:flex;align-items:center;justify-content:center;gap:15px;margin-bottom:10px;">
+            <img src="data:image/jpeg;base64,{logo_b64}"
+                alt="LocalAiLab Logo"
+                style="width:80px;height:80px;border-radius:15px;">
+            <div>
+                <h2 style="margin:0;">បង្កើតដោយ LocalAiLab</h2>
+                <a href="https://youtube.com/@localailabkh" target="_blank">
+                    📺 LocalAiLab យូធូបឆាណែល
+                </a>
+            </div>
+        </div>
         """,
-        "subtitle": "🔍 ភ្នាក់ងារ AI",
+        "subtitle": "🔍 LocalAiLab · កំណែ {version}",
         "tab_general": "💬 ការសន្ទនាទូទៅ",
         "tab_general_desc": "ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយកទិន្នន័យឡើយ។",
-        "tab_rag": "📚 ការសន្ទនា RAG",
+        "tab_rag": "📚 វិភាគឯកសារ",
         "tab_rag_desc": "រាល់សំណួរនឹងទាញយកទិន្នន័យពីមូលដ្ឋានចំណេះដឹងជាមុនសិន រួចទើប LLM ឆ្លើយដោយប្រើតែបរិបទនោះ។",
-        "tab_vision": "🖼️ ការសន្ទនាចក្ខុវិស័យ",
+        "tab_vision": "🖼️​ វិភាគរូបភាព",
         "tab_vision_desc": "បង្ហោះរូបភាព និងសួរអំពីវា។",
-        "tab_kb": "📂 មូលដ្ឋានចំណេះដឹង",
-        "tab_stt": "🎙️ និយាយទៅជាអក្សរ",
+        "tab_kb": "📂 បញ្ចូលឯកសារ",
+        "tab_stt": "🎙️ សំលេងទៅជាអក្សរ",
         "tab_stt_desc": "បង្ហោះ ឬថតសំឡេង ដើម្បីបំលែងវាទៅជាអក្សរ។",
+        "tab_data": "📊 វិភាគទិន្នន័យ",
+        "tab_data_desc": "បង្ហោះឯកសារ CSV ឬ Excel ហើយសួរ AI Agent ឱ្យវិភាគទិន្នន័យ បង្កើតក្រាហ្វិក និងរបាយការណ៍។ Agent អាចដំឡើង Python package ដែលត្រូវការដោយស្វ័យប្រវត្តិ។",
+        "data_file_label": "ទម្លាក់ឯកសារ CSV / XLSX / XLS",
+        "placeholder_data": "សួរអំពីទិន្នន័យរបស់អ្នក ឧ. តើនិន្នាការលក់ជារៀងរាល់ខែយ៉ាងណា?",
+        "label_charts": "🖼️ ក្រាហ្វិកដែលបានបង្កើត",
+        "label_report_file": "📄 ទាញយករបាយការណ៍ (Markdown)",
+        "btn_reset_agent": "🔄 កំណត់ Agent ឡើងវិញ",
         "tab_about": "ℹ️ អំពីកម្មវិធី",
         "placeholder_gen": "និយាយអ្វីមួយ...",
         "placeholder_rag": "សួរអំពីឯកសាររបស់អ្នក...",
@@ -59,6 +82,7 @@ LANGUAGES = {
         "label_vlm": "🎨 Vision LLM",
         "label_stt": "🎙️ ម៉ូដែលនិយាយទៅជាអក្សរ",
         "label_stt_lang": "🌐 ភាសានៃសំឡេង",
+        "stt_khmer_hint": "💡 សម្រាប់ភាពត្រឹមត្រូវជាភាសាខ្មែរ សូមជ្រើសរើសម៉ូដែល 🇰🇭 ដែលបានបណ្តុះបណ្តាលជាពិសេសសម្រាប់ភាសាខ្មែរ ខាងលើ។ ម៉ូដែល Whisper ធម្មតាមានទិន្នន័យបណ្តុះបណ្តាលភាសាខ្មែរតិចតួច។",
         "btn_transcribe": "📝 បំលែងជាអក្សរ",
         "stt_audio_label": "ថត ឬបង្ហោះសំឡេង",
         "label_vis_rag": "🔍 ក៏ទាញយកបរិបទអត្ថបទផងដែរ",
@@ -69,10 +93,11 @@ LANGUAGES = {
         "header_docs": "--- \n### 📋 ឯកសារដែលបានបញ្ចូល",
         "accordion_add": "📤 បន្ថែមឯកសារ",
         "file_label": "ទម្លាក់ PDF / TXT / MD",
+        "about_version": "### 🔖 កំណែ {version}\nភ្នាក់ងារ RAG មូលដ្ឋាន ពហុភាសា (ខ្មែរ/អង់គ្លេស) និងពហុម៉ូដាល — សន្ទនាទូទៅ វិភាគឯកសារតាមរយៈ RAG យល់ដឹងរូបភាព បំលែងសំឡេងទៅជាអក្សរ វិភាគទិន្នន័យ CSV/Excel ដោយ AI Agent និងគ្រប់គ្រងមូលដ្ឋានចំណេះដឹង — ដំណើរការទាំងស្រុងនៅលើកុំព្យូទ័ររបស់អ្នក។",
         "about_tabs_title": """បង្កើតដោយ LocalAiLab ·
         📺 <a href="https://youtube.com/@localailabkh" target="_blank">LocalAiLab យូធូបឆាណែល</a>
         """,
-        "about_tabs_desc": "| ផ្ទាំង | ការពិពណ៌នា |\n|---|---|\n| 💬 ការសន្ទនាទូទៅ | ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយក |\n| 📚 ការសន្ទនា RAG | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន រួចឆ្លើយ |\n| 🖼️ ការសន្ទនាចក្ខុវិស័យ | យល់ដឹងរូបភាព ជាមួយបរិបទអត្ថបទ |\n| 🎙️ និយាយទៅជាអក្សរ | បំលែងសំឡេងជាអក្សរ ដោយប្រើ Whisper |\n| 📂 មូលដ្ឋានចំណេះដឹង | បង្ហោះ និងគ្រប់គ្រងឯកសារ |",
+        "about_tabs_desc": "| ផ្ទាំង | ការពិពណ៌នា |\n|---|---|\n| 💬 ការសន្ទនាទូទៅ | ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយក |\n| 📚 ការសន្ទនា RAG | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន រួចឆ្លើយ |\n| 🖼️ ការសន្ទនាចក្ខុវិស័យ | យល់ដឹងរូបភាព ជាមួយបរិបទអត្ថបទ |\n| 🎙️ និយាយទៅជាអក្សរ | បំលែងសំឡេងជាអក្សរ ដោយប្រើ Whisper |\n| 📊 វិភាគទិន្នន័យ | Agent វិភាគ CSV/Excel បង្កើតក្រាហ្វិក និងរបាយការណ៍ |\n| 📂 មូលដ្ឋានចំណេះដឹង | បង្ហោះ និងគ្រប់គ្រងឯកសារ |",
         "about_arch_title": "## ស្ថាបត្យកម្ម",
         "about_arch_desc": "| សមាសធាតុ | លម្អិត |\n|---|---|",
         "about_speed_title": "## ល្បឿនរំពឹងទុក ({device})",
@@ -114,7 +139,7 @@ LANGUAGES = {
     },
     "en": {
         "title": "🔍 RAG Agent",
-        "subtitle": "smolagents · ChromaDB · Gemma4 / Qwen3.6 · {device} · Developed by LocalAiLab",
+        "subtitle": "smolagents · ChromaDB · Gemma4 / Qwen3.6 · {device} · v{version} · Developed by LocalAiLab",
         "tab_general": "💬 General Chat",
         "tab_general_desc": "Direct conversation with the LLM — no retrieval.",
         "tab_rag": "📚 RAG Chat",
@@ -124,6 +149,13 @@ LANGUAGES = {
         "tab_kb": "📂 Knowledge Base",
         "tab_stt": "🎙️ Speech to Text",
         "tab_stt_desc": "Upload or record audio to transcribe it into text.",
+        "tab_data": "📊 Data Analysis",
+        "tab_data_desc": "Upload a CSV or Excel file and ask the AI agent to analyze it, build charts, and write a report. The agent can install any Python packages it needs.",
+        "data_file_label": "Drop CSV / XLSX / XLS",
+        "placeholder_data": "Ask about your data, e.g. what's the monthly sales trend?",
+        "label_charts": "🖼️ Generated Charts",
+        "label_report_file": "📄 Download Report (Markdown)",
+        "btn_reset_agent": "🔄 Reset Agent",
         "tab_about": "ℹ️ About",
         "placeholder_gen": "Say anything ...",
         "placeholder_rag": "Ask about your documents ...",
@@ -139,6 +171,7 @@ LANGUAGES = {
         "label_vlm": "🎨 Vision LLM",
         "label_stt": "🎙️ Speech-to-Text Model",
         "label_stt_lang": "🌐 Audio Language",
+        "stt_khmer_hint": "💡 For better Khmer accuracy, choose one of the 🇰🇭 Khmer-tuned models above. Vanilla Whisper models only saw a small amount of Khmer during training.",
         "btn_transcribe": "📝 Transcribe",
         "stt_audio_label": "Record or upload audio",
         "label_vis_rag": "🔍 Also retrieve text context",
@@ -149,8 +182,9 @@ LANGUAGES = {
         "header_docs": "--- \n### 📋 Indexed Documents",
         "accordion_add": "📤 Add Documents",
         "file_label": "Drop PDF / TXT / MD",
+        "about_version": "### 🔖 Version {version}\nA local, bilingual (Khmer/English), multi-modal RAG agent — general chat, document RAG, vision chat, speech-to-text, AI-driven CSV/Excel data analysis, and knowledge base management — running entirely on your own machine.",
         "about_tabs_title": "## Tabs",
-        "about_tabs_desc": "| Tab | Description |\n|---|---|\n| 💬 General Chat | Direct LLM conversation — no retrieval |\n| 📚 RAG Chat | Retrieves from knowledge base first, then answers |\n| 🖼️ Vision Chat | Image understanding with optional text context |\n| 🎙️ Speech to Text | Transcribe audio into text using Whisper |\n| 📂 Knowledge Base | Upload & manage indexed documents |",
+        "about_tabs_desc": "| Tab | Description |\n|---|---|\n| 💬 General Chat | Direct LLM conversation — no retrieval |\n| 📚 RAG Chat | Retrieves from knowledge base first, then answers |\n| 🖼️ Vision Chat | Image understanding with optional text context |\n| 🎙️ Speech to Text | Transcribe audio into text using Whisper |\n| 📊 Data Analysis | Agent analyzes CSV/Excel, builds charts and a report |\n| 📂 Knowledge Base | Upload & manage indexed documents |",
         "about_arch_title": "## Architecture",
         "about_arch_desc": "| Component | Detail |\n|---|---|",
         "about_speed_title": "## Expected speed ({device})",
@@ -331,6 +365,7 @@ def _load_logo_b64() -> str:
 
 DEVELOPER_LOGO_B64 = _load_logo_b64()
 DEVELOPER_NAME = "LocalAiLab"
+APP_VERSION = "1.2.0-beta"
 
 MODEL_OPTIONS = {
     "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)": "Qwen/Qwen3-0.6B",
@@ -360,6 +395,8 @@ STT_OPTIONS = {
     "🟡 Whisper-base    (~1 GB RAM)":              "openai/whisper-base",
     "🟡 Whisper-small   (~2 GB RAM | recommended)": "openai/whisper-small",
     "🔵 Whisper-large-v3 (~10 GB RAM | best accuracy, multilingual incl. Khmer)": "openai/whisper-large-v3",
+    "🇰🇭 Whisper-small — ខ្មែរ (~1 GB RAM | Khmer-tuned)": "seanghay/whisper-small-khmer-v2",
+    "🇰🇭 Whisper-large-v3-turbo — ខ្មែរ (~6 GB RAM | best for Khmer)": "metythorn/whisper-large-v3-turbo-mixed-20eps-clean-text-197k",
 }
 DEFAULT_STT_LABEL = "🟡 Whisper-small   (~2 GB RAM | recommended)"
 DEFAULT_STT_MODEL = STT_OPTIONS[DEFAULT_STT_LABEL]
@@ -371,6 +408,11 @@ CHUNK_SIZE          = 1024
 CHUNK_OVERLAP       = 128
 TOP_K               = 4
 MAX_NEW_TOKENS      = 512
+
+DATA_ANALYSIS_DIR   = "./data_analysis"
+DATA_UPLOAD_DIR      = os.path.join(DATA_ANALYSIS_DIR, "uploads")
+DATA_OUTPUT_DIR      = os.path.join(DATA_ANALYSIS_DIR, "outputs")
+DATA_AGENT_MAX_STEPS = 12
 
 QWEN3_IDS   = {"Qwen/Qwen3-0.6B","Qwen/Qwen3-1.7B","Qwen/Qwen3-4B",
                "Qwen/Qwen3-8B","Qwen/Qwen3-14B","Qwen/Qwen3-32B"}
@@ -394,6 +436,9 @@ _vlm_lock            = threading.Lock()
 _stt_pipeline        = None
 _stt_model_id        = None
 _stt_lock            = threading.Lock()
+_data_agent          = None
+_data_agent_model_id = None
+_data_agent_lock     = threading.Lock()
 
 
 def get_embed_model():
@@ -643,21 +688,180 @@ def transcribe_audio(audio_path: Optional[str], language: Optional[str] = None,
         return f"❌ {e}\n\n{traceback.format_exc()}"
 
 
-def get_visual_retriever(model_id: Optional[str] = None):
-    global _visual_retriever, _visual_retriever_id
-    target = model_id or DEFAULT_VISUAL_RETRIEVER
-    if _visual_retriever is not None and target == _visual_retriever_id:
-        return _visual_retriever
+# ──────────────────────────────────────────────────────────────────
+# Data Analysis — smolagents CodeAgent w/ pip-install tool
+# ──────────────────────────────────────────────────────────────────
+from smolagents import CodeAgent, tool
+
+
+@tool
+def install_package(package_name: str) -> str:
+    """
+    Install a Python package into the current environment using pip.
+    Use this whenever a data-analysis step needs a library that is not
+    yet installed (e.g. "openpyxl" for reading .xlsx files, "seaborn",
+    "scikit-learn", "statsmodels", "plotly", "xlsxwriter").
+
+    Args:
+        package_name: The pip package name to install, e.g. "seaborn" or
+            "scikit-learn==1.4.0". Pass a single package per call.
+    """
     try:
-        from byaldi import RAGMultiModalModel
-        index_path = Path(VISUAL_INDEX_DIR) / "main"
-        if index_path.exists():
-            _visual_retriever = RAGMultiModalModel.from_index(str(index_path), verbose=0)
-        else:
-            _visual_retriever = RAGMultiModalModel.from_pretrained(target, verbose=0)
-        _visual_retriever_id = target
-    except ImportError:
-        _visual_retriever = None
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", package_name],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            return f"✅ Installed '{package_name}' successfully."
+        return f"❌ Failed to install '{package_name}':\n{result.stderr[-2000:]}"
+    except subprocess.TimeoutExpired:
+        return f"❌ Installing '{package_name}' timed out after 300s."
+    except Exception as e:
+        return f"❌ Error installing '{package_name}': {e}"
+
+
+def get_data_agent(model_id: Optional[str] = None):
+    """Lazily build (or rebuild, if the model changed) the data-analysis CodeAgent."""
+    global _data_agent, _data_agent_model_id
+    target = model_id or _llm_model_id
+
+    if _data_agent is not None and target == _data_agent_model_id:
+        return _data_agent
+
+    with _data_agent_lock:
+        if _data_agent is not None and target == _data_agent_model_id:
+            return _data_agent
+
+        print(f"[DataAgent] Building CodeAgent on '{target}' …")
+        llm = get_llm(target)
+        _data_agent = CodeAgent(
+            model=llm,
+            tools=[install_package],
+            additional_authorized_imports=["*"],   # trusted local machine — full stdlib + installed pkgs
+            max_steps=DATA_AGENT_MAX_STEPS,
+        )
+        _data_agent_model_id = target
+        return _data_agent
+
+
+def save_data_files(files) -> list:
+    """Copy uploaded CSV/XLSX files into the persistent data-analysis workspace."""
+    Path(DATA_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    paths = []
+    if not files:
+        return paths
+    if not isinstance(files, list):
+        files = [files]
+    for f in files:
+        src = _get_file_path(f)
+        if not src:
+            continue
+        dest = Path(DATA_UPLOAD_DIR) / Path(src).name
+        try:
+            shutil.copy(src, dest)
+            paths.append(str(dest))
+        except Exception:
+            pass
+    return paths
+
+
+def run_data_analysis(files, question: str, model_label: str, history: list):
+    """Hand uploaded data + the user's question to the CodeAgent and collect its report."""
+    history = history or []
+
+    paths = save_data_files(files)
+    if not paths:
+        history.append({"role": "user", "content": question or "(no file)"})
+        history.append({"role": "assistant", "content": "⚠️ Please upload a CSV or XLSX file first."})
+        return history, None, None
+
+    question = (question or "").strip() or (
+        "Explore this dataset, summarize key statistics and trends, "
+        "and generate a short report with at least one chart."
+    )
+    model_id = MODEL_OPTIONS.get(model_label, DEFAULT_LLM_MODEL)
+    history.append({"role": "user", "content": f"📎 {', '.join(Path(p).name for p in paths)}\n\n{question}"})
+
+    try:
+        Path(DATA_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+        agent = get_data_agent(model_id)
+        file_list_str = "\n".join(f"- {p}" for p in paths)
+        report_path = str(Path(DATA_OUTPUT_DIR) / "report.md")
+
+        task = f"""You are a data analysis assistant working with pandas in a local Python sandbox.
+
+Data file(s) provided by the user:
+{file_list_str}
+
+User request: {question}
+
+Instructions:
+1. Load the file(s) with pandas (pd.read_csv for .csv, pd.read_excel for .xlsx/.xls —
+   if a required package like 'openpyxl' is missing, call the install_package tool with
+   its pip name first, then retry the import).
+2. Explore the data: shape, columns, dtypes, missing values, basic descriptive statistics.
+3. Perform the analysis the user asked for. If a package you need isn't available,
+   install it with the install_package tool instead of giving up.
+4. Create at least one relevant chart with matplotlib and save each chart as a PNG file
+   inside the directory '{DATA_OUTPUT_DIR}' (use plt.savefig(...); do not call plt.show()).
+5. Write a concise Markdown report of your findings (headings, bullet points, key numbers)
+   and save it to '{report_path}'.
+6. As your FINAL ANSWER, return the full Markdown report text.
+"""
+        t0 = time.time()
+        result = agent.run(task)
+        elapsed = time.time() - t0
+
+        report_text = str(result)
+        response = (
+            report_text +
+            f"\n\n<hr><sub>⏱ {elapsed:.1f}s | model: <code>{model_id}</code> ({DEVICE.upper()})</sub>"
+        )
+        history.append({"role": "assistant", "content": response})
+
+        chart_files = sorted(str(p) for p in Path(DATA_OUTPUT_DIR).glob("*.png"))
+        report_file = report_path if Path(report_path).exists() else None
+        return history, (chart_files or None), report_file
+
+    except Exception as e:
+        import traceback
+        history.append({"role": "assistant", "content": f"❌ {e}\n\n{traceback.format_exc()}"})
+        return history, None, None
+
+
+def get_visual_retriever():
+    global _visual_retriever
+
+    if _visual_retriever is not None:
+        return _visual_retriever
+
+    target = DEFAULT_VISUAL_RETRIEVER
+
+    try:
+        print(f"[Vision] Loading visual retriever: {target}")
+
+        _visual_retriever = RAGMultiModalModel.from_pretrained(
+            target,
+            verbose=0,
+        )
+
+        print(f"[Vision] Loaded: {target}")
+
+    except ValueError as e:
+        # Older Byaldi versions only support ColPali / ColQwen2
+        if "only supports ColPali and ColQwen2" not in str(e):
+            raise
+
+        fallback = "vidore/colqwen2-v1.0"
+
+        print(f"[Vision] '{target}' is not supported by this version of Byaldi.")
+        print(f"[Vision] Falling back to: {fallback}")
+
+        _visual_retriever = RAGMultiModalModel.from_pretrained(
+            fallback,
+            verbose=0,
+        )
+
     return _visual_retriever
 
 
@@ -1033,6 +1237,9 @@ CSS = """
 .header-sub   { font-size:0.9rem; color:#aaa; }
 .dev-logo     { width:56px; height:56px; border-radius:50%; object-fit:cover;
                 box-shadow:0 0 8px rgba(120,80,255,0.6); flex-shrink:0; margin-right:4px; }
+.beta-badge   { display:inline-block; font-size:0.68rem; font-weight:700; letter-spacing:0.5px;
+                color:#1a1a1a; background:#ffcc66; border-radius:999px; padding:2px 9px;
+                margin-left:6px; vertical-align:middle; }
 """
 
 def refresh_system_ui():
@@ -1084,11 +1291,12 @@ def build_ui():
                             )
                     with gr.Column():
                         header_title = gr.HTML(
-                            f'<div class="header-wrap"><span class="header-title">{L["title"]}</span></div>'
+                            f'<div class="header-wrap"><span class="header-title">{L["title"]}</span>'
+                            f'<span class="beta-badge">BETA</span></div>'
                         )
                         header_sub = gr.HTML(
                             f'<div class="header-wrap"><span class="header-sub">'
-                            f'{L["subtitle"].format(device=DEVICE.upper())}</span></div>'
+                            f'{L["subtitle"].format(device=DEVICE.upper(), version=APP_VERSION)}</span></div>'
                         )
             with gr.Column(scale=2, variant="panel"):
                 lang_dropdown = gr.Dropdown(
@@ -1153,10 +1361,27 @@ def build_ui():
                     )
                     load_stt_btn = gr.Button(L["btn_load"], size="sm", scale=2)
                     load_stt_out = gr.Textbox(show_label=False, interactive=False, scale=3)
+                stt_hint = gr.Markdown(L["stt_khmer_hint"])
                 transcribe_btn = gr.Button(L["btn_transcribe"], variant="primary")
                 stt_output     = gr.Textbox(label=L["label_res"], lines=8, interactive=True)
 
-            # ── Tab 5: Knowledge Base ─────────────────────────────
+            # ── Tab 5: Data Analysis ──────────────────────────────
+            with gr.Tab(L["tab_data"]) as tab_data:
+                data_desc    = gr.Markdown(L["tab_data_desc"])
+                data_file_up = gr.File(label=L["data_file_label"], file_types=[".csv", ".xlsx", ".xls"], file_count="multiple")
+                bot_data     = gr.Chatbot(height=420)
+                with gr.Row():
+                    msg_data  = gr.Textbox(placeholder=L["placeholder_data"], show_label=False, scale=8)
+                    send_data = gr.Button(L["btn_send"], variant="primary", scale=1)
+                with gr.Row():
+                    model_dd_data  = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label=L["label_llm"], scale=6)
+                    reset_data_btn = gr.Button(L["btn_reset_agent"], size="sm", scale=2)
+                    reset_data_out = gr.Textbox(show_label=False, interactive=False, scale=4)
+                data_gallery     = gr.Gallery(label=L["label_charts"], columns=3, height=280)
+                data_report_file = gr.File(label=L["label_report_file"], interactive=False)
+                clear_data = gr.Button(L["btn_clear"], size="sm")
+
+            # ── Tab 6: Knowledge Base ─────────────────────────────
             with gr.Tab(L["tab_kb"]) as tab_kb:
                 with gr.Accordion(L["accordion_add"], open=True) as acc_add:
                     file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md"], file_count="multiple")
@@ -1178,8 +1403,9 @@ def build_ui():
                 action_msg         = gr.Textbox(label="", interactive=False, lines=1)
                 selected_rows_state = gr.State([])
 
-            # ── Tab 6: About ──────────────────────────────────────
+            # ── Tab 7: About ──────────────────────────────────────
             with gr.Tab(L["tab_about"]) as tab_about:
+                about_version_md    = gr.Markdown(L["about_version"].format(version=APP_VERSION))
                 about_tabs_title_md  = gr.Markdown(L["about_tabs_title"])
                 about_tabs_desc_md   = gr.Markdown(L["about_tabs_desc"])
                 about_arch_title_md  = gr.Markdown(L["about_arch_title"])
@@ -1254,6 +1480,24 @@ def build_ui():
         transcribe_btn.click(do_transcribe, [stt_audio, stt_dd, stt_lang_dd], [stt_output])
         load_stt_btn.click(load_stt_fn, [stt_dd], [load_stt_out])
 
+        # Data Analysis
+        def reset_data_agent_fn():
+            global _data_agent, _data_agent_model_id
+            _data_agent = None
+            _data_agent_model_id = None
+            return "✅ Agent reset — will rebuild on next run."
+
+        def do_data_analysis(files, question, model_label, history):
+            history, gallery, report_file = run_data_analysis(files, question, model_label, history)
+            return history, "", gallery, report_file
+
+        send_data.click(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data],
+                        [bot_data, msg_data, data_gallery, data_report_file])
+        msg_data.submit(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data],
+                        [bot_data, msg_data, data_gallery, data_report_file])
+        clear_data.click(lambda: ([], None, None), outputs=[bot_data, data_gallery, data_report_file])
+        reset_data_btn.click(reset_data_agent_fn, outputs=[reset_data_out])
+
         # Knowledge Base
         def on_select(evt: gr.SelectData, current):
             row = evt.index[0]
@@ -1290,8 +1534,9 @@ def build_ui():
             return (
                 lk,
                 # header
-                f'<div class="header-wrap"><span class="header-title">{l["title"]}</span></div>',
-                f'<div class="header-wrap"><span class="header-sub">{l["subtitle"].format(device=DEVICE.upper())}</span></div>',
+                f'<div class="header-wrap"><span class="header-title">{l["title"]}</span>'
+                f'<span class="beta-badge">BETA</span></div>',
+                f'<div class="header-wrap"><span class="header-sub">{l["subtitle"].format(device=DEVICE.upper(), version=APP_VERSION)}</span></div>',
                 # General Chat
                 gr.update(value=l["tab_general_desc"]),
                 gr.update(placeholder=l["placeholder_gen"]),
@@ -1320,8 +1565,19 @@ def build_ui():
                 gr.update(label=l["label_stt"]),
                 gr.update(label=l["label_stt_lang"]),
                 gr.update(value=l["btn_load"]),
+                gr.update(value=l["stt_khmer_hint"]),
                 gr.update(value=l["btn_transcribe"]),
                 gr.update(label=l["label_res"]),
+                # Data Analysis
+                gr.update(value=l["tab_data_desc"]),
+                gr.update(label=l["data_file_label"]),
+                gr.update(placeholder=l["placeholder_data"]),
+                gr.update(value=l["btn_send"]),
+                gr.update(label=l["label_llm"]),
+                gr.update(value=l["btn_reset_agent"]),
+                gr.update(label=l["label_charts"]),
+                gr.update(label=l["label_report_file"]),
+                gr.update(value=l["btn_clear"]),
                 # Knowledge Base
                 gr.update(label=l["file_label"]),
                 gr.update(label=l["label_vis_ret"]),
@@ -1332,6 +1588,7 @@ def build_ui():
                 gr.update(value=l["btn_delete"]),
                 gr.update(value=l["btn_clear_all"]),
                 # About
+                gr.update(value=l["about_version"].format(version=APP_VERSION)),
                 gr.update(value=l["about_tabs_title"]),
                 gr.update(value=l["about_tabs_desc"]),
                 gr.update(value=l["about_arch_title"]),
@@ -1351,11 +1608,15 @@ def build_ui():
             # Vision Chat
             vis_desc, msg_vis, send_vis, vlm_dd, vis_rag_chk, load_vlm_btn, clear_vis,
             # STT
-            stt_desc, stt_audio, stt_dd, stt_lang_dd, load_stt_btn, transcribe_btn, stt_output,
+            stt_desc, stt_audio, stt_dd, stt_lang_dd, load_stt_btn, stt_hint, transcribe_btn, stt_output,
+            # Data Analysis
+            data_desc, data_file_up, msg_data, send_data, model_dd_data, reset_data_btn,
+            data_gallery, data_report_file, clear_data,
             # Knowledge Base
             file_up, vis_ret_dd, up_btn, up_msg,
             kb_header, refresh_btn, delete_sel_btn, clear_all_btn,
             # About
+            about_version_md,
             about_tabs_title_md, about_tabs_desc_md,
             about_arch_title_md, about_arch_desc_md,
             about_speed_title_md, about_speed_desc_md,

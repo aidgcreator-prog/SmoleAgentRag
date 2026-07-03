@@ -31,6 +31,12 @@ pdf2image>=1.17.0               # render PDF pages as images for visual indexing
 PyMuPDF>=1.24.0                 # fast PDF text extraction (imported as "fitz")
 datasets>=2.20.0                # HuggingFace dataset loading
 
+# ── Data Analysis Agent (CSV/XLSX exploration, charts, reports) ──
+pandas>=2.0.0
+numpy>=1.26.0
+matplotlib>=3.8.0
+openpyxl>=3.1.0                 # required for pandas to read/write .xlsx
+
 # ── UI ────────────────────────────────────────────────────────────
 gradio>=4.40.0
 
