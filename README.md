@@ -50,14 +50,32 @@ pip install torch torchvision
 
 **ជម្រើស — ការគាំទ្រម៉ូដែល llama.cpp (GGUF)**
 
-`requirements.txt` រួមបញ្ចូល `llama-cpp-python` រួចហើយ ប៉ុន្តែការដំឡើងធម្មតាតាមរយៈ pip គឺសម្រាប់ **CPU ប៉ុណ្ណោះ**។ ដើម្បីបានការបង្កើនល្បឿនតាមរយៈ GPU (NVIDIA/CUDA) នៅលើ Windows:
+`requirements.txt` រួមបញ្ចូល `llama-cpp-python` ជាមូលដ្ឋាន ប៉ុន្តែការដំឡើងធម្មតាតាមរយៈ `pip install -r requirements.txt` ផ្តល់ជូនតែ **wheel សម្រាប់ CPU ប៉ុណ្ណោះ**។ ដើម្បីទទួលបានការបង្កើនល្បឿនតាមរយៈ GPU និងកម្មវិធីដែលត្រូវនឹង CPU របស់អ្នកពិតប្រាកដ សូមប្រើ **SETUP.bat** ជំនួសវិញ — វានឹង៖
+
+1. រកឃើញ GPU របស់អ្នក (NVIDIA/CUDA, AMD/ROCm ឬគ្មាន GPU)
+2. សាកល្បង prebuilt wheel CUDA ជាច្រើនកំណែ ចាប់ពីត្រូវនឹង driver របស់អ្នកបំផុត
+3. **ធ្វើតេស្តផ្ទុកម៉ូដែលពិតប្រាកដ** ដើម្បីប្រាកដថា wheel នោះដំណើរការលើ CPU របស់អ្នក (មិនគ្រាន់តែពិនិត្យថាការដំឡើងជោគជ័យ) — នេះការពារបញ្ហា "Illegal Instruction" ដែលកើតឡើងនៅពេល wheel សន្មតថា CPU គាំទ្រ AVX512 ប៉ុន្តែតាមពិតមិនគាំទ្រ
+4. ប្រសិនបើគ្មាន wheel ណាដំណើរការ នឹងសាកល្បងសាងសង់ពី source ជាមួយ `CMAKE_ARGS=-DGGML_CUDA=on` (ត្រូវការ Visual Studio Build Tools + CUDA Toolkit)
+5. ចុងក្រោយបំផុត ត្រលប់ទៅ CPU-only wheel ប្រសិនបើគ្មានផ្លូវ GPU ណាមួយដំណើរការ — ម៉ូដែល GGUF នៅតែប្រើប្រាស់បាន គ្រាន់តែយឺតជាង
+
+ចំពោះការដំឡើងដោយដៃវិញ (Windows, NVIDIA):
+
+```powershell
+pip uninstall llama-cpp-python -y
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 --force-reinstall --no-cache-dir
+```
+
+ប្តូរ `cu124` ទៅជាកំណែ CUDA ដែលត្រូវនឹង driver របស់អ្នក (`nvidia-smi` បង្ហាញវានៅជ្រុងខាងស្តាំខាងលើ)។ ប្រសិនបើ wheel នោះគាំង ("Illegal Instruction") សូមសាងសង់ពី source ជំនួសវិញ៖
 
 ```powershell
 $env:CMAKE_ARGS = "-DGGML_CUDA=on"
-pip install llama-cpp-python --no-cache-dir
+$env:FORCE_CMAKE = "1"
+pip install llama-cpp-python --no-cache-dir --force-reinstall
 ```
 
-ដាក់ឯកសារ `.gguf` របស់អ្នកទៅក្នុងថត `I:\llama_cpp\llamaccp_models` — កម្មវិធីនឹងស្កេនរកឯកសារទាំងនោះដោយស្វ័យប្រវត្តិ ហើយបង្ហាញឈ្មោះម៉ូដែលក្នុងបញ្ជីទម្លាក់ម៉ូដែលដូចគ្នានឹងម៉ូដែល HuggingFace។ មិនចាំបាច់ដំណើរការ `llama-server` ដាច់ដោយឡែកទេ — ម៉ូដែលត្រូវបានផ្ទុកផ្ទាល់នៅក្នុងដំណើរការរបស់ `app.py`។
+**Flash Attention**: កម្មវិធីនេះស្នើសុំ `flash_attn=True` ដោយស្វ័យប្រវត្តិនៅពេលផ្ទុកម៉ូដែល GGUF ណាមួយ លុះត្រាតែប្រព័ន្ធរបស់អ្នកមិនមាន GPU ។ ម៉ូដែលមួយចំនួន (ជាពិសេសម៉ូដែលដែលប្រើ hybrid local/global attention ដូចជា Gemma-3/4) មិនគាំទ្រ Flash Attention នៅឡើយទេនៅក្នុង llama.cpp — ក្នុងករណីនេះកម្មវិធីនឹងបន្តដំណើរការធម្មតាដោយមិនប្រើ Flash Attention ដោយស្វ័យប្រវត្តិ ដោយមិនគាំង។
+
+ដាក់ឯកសារ `.gguf` របស់អ្នកទៅក្នុងថតណាមួយដែលអ្នកចង់បាន — **គ្មានផ្លូវត្រូវបានកំណត់ស្រាប់ក្នុងកូដទេ**។ កំណត់ថតនោះតាមវិធីណាមួយក្នុងចំណោមពីរ៖ (១) ដាក់អថេរបរិស្ថាន `LLAMA_CPP_MODEL_DIR` មុនចាប់ផ្តើមកម្មវិធី ឬ (២) វាយផ្លូវថតចូលទៅក្នុងប្រអប់ "📁 ថតម៉ូដែល GGUF" នៅផ្នែកខាងលើចំណុចប្រទាក់ រួចចុច "🔍 ស្កេន" — មិនចាំបាច់ចាប់ផ្តើមកម្មវិធីឡើងវិញឡើយ។ កម្មវិធីនឹងស្កេនរកឯកសារ `.gguf` ក្នុងថតនោះ ហើយបង្ហាញឈ្មោះម៉ូដែលក្នុងបញ្ជីទម្លាក់ម៉ូដែលដូចគ្នានឹងម៉ូដែល HuggingFace ព្រមទាំងសម្គាល់ថាតើម៉ូដែលនោះនឹងដំណើរការលើ GPU ឬ CPU ។ មិនចាំបាច់ដំណើរការ `llama-server` ដាច់ដោយឡែកទេ — ម៉ូដែលត្រូវបានផ្ទុកផ្ទាល់នៅក្នុងដំណើរការរបស់ `app.py`។
 
 នៅលើ Windows អ្នកគ្រាន់តែចុចពីរដងលើ **SETUP.bat** ដើម្បីដំឡើង Python បង្កើត virtual environment រកឃើញ GPU របស់អ្នក និងដំឡើងអ្វីៗគ្រប់យ៉ាងដោយស្វ័យប្រវត្តិ។
 
@@ -140,7 +158,7 @@ python app.py
 | ~3 GB | `Qwen/Qwen3-1.7B` |
 | ~7 GB | `Qwen/Qwen3-4B` |
 | ~4 GB | `google/gemma-4-E2B-it` |
-| ប្រែប្រួល | ម៉ូដែល `.gguf` ណាមួយនៅក្នុងថត `I:\llama_cpp\llamaccp_models` (តាមរយៈ llama.cpp) |
+| ប្រែប្រួល | ម៉ូដែល `.gguf` ណាមួយនៅក្នុងថតដែលអ្នកកំណត់ (សូមមើលផ្នែក "ការគាំទ្រម៉ូដែល llama.cpp (GGUF)" ខាងលើ) (តាមរយៈ llama.cpp) |
 
 #### Vision LLMs (VLM)
 | RAM | ម៉ូដែលដែលណែនាំ |
@@ -222,14 +240,32 @@ pip install torch torchvision
 
 **Optional — llama.cpp (GGUF) model support**
 
-`requirements.txt` already includes `llama-cpp-python`, but the plain `pip install` gives you a **CPU-only** build. For GPU acceleration (NVIDIA/CUDA) on Windows:
+`requirements.txt` already includes `llama-cpp-python`, but `pip install -r requirements.txt` alone only gives you a **CPU-only** build. For real GPU acceleration and a build that actually matches your CPU, use **SETUP.bat** instead — it will:
+
+1. Detect your GPU (NVIDIA/CUDA, AMD/ROCm, or none)
+2. Probe several prebuilt CUDA wheel tiers, newest-compatible-with-your-driver first
+3. **Actually load a model as a smoke test**, not just check that `pip install` succeeded — this catches the "Illegal Instruction" crash that happens when a prebuilt wheel assumes CPU features (like AVX512) your CPU doesn't have
+4. Fall back to compiling from source with `CMAKE_ARGS=-DGGML_CUDA=on` if no prebuilt wheel works (requires Visual Studio Build Tools + CUDA Toolkit)
+5. Fall back to a CPU-only build as a last resort — GGUF models still work, just slower
+
+To do this by hand on Windows/NVIDIA:
+
+```powershell
+pip uninstall llama-cpp-python -y
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 --force-reinstall --no-cache-dir
+```
+
+Swap `cu124` for whatever CUDA tier matches your driver (`nvidia-smi` shows it in the top-right). If that wheel crashes with an "Illegal Instruction" error, build from source instead:
 
 ```powershell
 $env:CMAKE_ARGS = "-DGGML_CUDA=on"
-pip install llama-cpp-python --no-cache-dir
+$env:FORCE_CMAKE = "1"
+pip install llama-cpp-python --no-cache-dir --force-reinstall
 ```
 
-Drop your `.gguf` files into `I:\llama_cpp\llamaccp_models` — the app auto-discovers them and lists them in the same model dropdown as the HuggingFace models. No separate `llama-server` process is required; models load directly inside `app.py`.
+**Flash Attention**: the app requests `flash_attn=True` automatically for any GGUF model whenever a GPU is available. Some architectures (notably hybrid local/global attention models like Gemma-3/4) don't yet support Flash Attention in llama.cpp — in that case the app transparently falls back to running without it instead of crashing.
+
+Drop your `.gguf` files into any folder you like — **no path is hardcoded in the code**. Point the app at that folder either of two ways: (1) set the `LLAMA_CPP_MODEL_DIR` environment variable before launching, or (2) type the folder path into the "📁 GGUF Model Folder" box at the top of the UI and click "🔍 Scan" — no restart needed. The app then auto-discovers the `.gguf` files in that folder, lists them in the same model dropdown as the HuggingFace models, and tags each one as GPU- or CPU-mode based on what's actually available. No separate `llama-server` process is required; models load directly inside `app.py`.
 
 On Windows, you can instead just double-click **SETUP.bat** to install Python, create the virtual environment, detect your GPU, and install everything automatically.
 
@@ -312,7 +348,7 @@ You can change models at runtime via the UI's model selection dropdowns.
 | ~3 GB | `Qwen/Qwen3-1.7B` |
 | ~7 GB | `Qwen/Qwen3-4B` |
 | ~4 GB | `google/gemma-4-E2B-it` |
-| varies | Any `.gguf` model placed in `I:\llama_cpp\llamaccp_models` (via llama.cpp) |
+| varies | Any `.gguf` model placed in your configured folder (see "llama.cpp (GGUF) model support" above) (via llama.cpp) |
 
 #### Vision LLMs (VLM)
 | RAM | Recommended model |

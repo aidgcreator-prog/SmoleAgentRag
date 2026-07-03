@@ -19,6 +19,8 @@ import subprocess
 import sys
 import platform
 import shutil
+import tempfile
+import contextlib
 from io import BytesIO
 from pathlib import Path
 from typing import Optional, Callable
@@ -36,6 +38,38 @@ try:
     LLAMA_CPP_AVAILABLE = True
 except ImportError:
     LLAMA_CPP_AVAILABLE = False
+
+
+def _detect_llama_cpp_gpu_support() -> bool:
+    """Best-effort check of whether the installed llama-cpp-python build was
+    actually compiled with GPU offload support (CUDA / Metal / ROCm).
+
+    This is independent of torch's CUDA detection — llama-cpp-python is a
+    separate compiled extension and, unless installed via SETUP.ps1 (which
+    picks a hardware-matched wheel) or built from source with the right
+    CMAKE_ARGS, pip installs a CPU-only build by default even on a machine
+    with a working NVIDIA GPU.
+
+    Falls back to True (optimistic) if the capability can't be introspected,
+    since requesting GPU layers on a CPU-only build simply no-ops rather
+    than crashing — the model still loads, just entirely on CPU.
+    """
+    if not LLAMA_CPP_AVAILABLE:
+        return False
+    try:
+        import llama_cpp as _llama_cpp_module
+        supports_fn = getattr(_llama_cpp_module, "llama_supports_gpu_offload", None)
+        if supports_fn is not None:
+            return bool(supports_fn())
+    except Exception:
+        pass
+    return True
+
+
+LLAMA_CPP_GPU_AVAILABLE = _detect_llama_cpp_gpu_support()
+if LLAMA_CPP_AVAILABLE:
+    print(f"[llama.cpp] GPU offload support: "
+          f"{'available' if LLAMA_CPP_GPU_AVAILABLE else 'NOT available (CPU-only build — GGUF models will run on CPU)'}")
 
 with open("image/logo.jpg", "rb") as f:
     logo_b64 = base64.b64encode(f.read()).decode()
@@ -66,6 +100,13 @@ LANGUAGES = {
         "tab_vision": "🖼️​ វិភាគរូបភាព",
         "tab_vision_desc": "បង្ហោះរូបភាព និងសួរអំពីវា។",
         "tab_kb": "📂 បញ្ចូលឯកសារ",
+        "label_gguf_dir": "📁 ថតម៉ូដែល GGUF (llama.cpp)",
+        "gguf_dir_placeholder": "ឧទាហរណ៍៖ D:\\models\\gguf — ទុកទទេដើម្បីបិទ",
+        "btn_scan_gguf": "🔍 ស្កេន",
+        "gguf_scan_found": "✅ រកឃើញម៉ូដែល GGUF ចំនួន {n} ក្នុង '{dir}' — សូមមើលបញ្ជីទម្លាក់ម៉ូដែលខាងលើ",
+        "gguf_scan_empty": "⚠️ រកមិនឃើញឯកសារ .gguf ក្នុង '{dir}' ទេ",
+        "gguf_scan_disabled": "ℹ️ គ្មានផ្លូវត្រូវបានផ្តល់ — មុខងារម៉ូដែល GGUF ត្រូវបានបិទ (ប្រើតែម៉ូដែល HuggingFace)",
+        "gguf_scan_no_backend": "⚠️ llama-cpp-python មិនទាន់បានដំឡើងទេ — មិនអាចប្រើម៉ូដែល GGUF បានទេ",
         "tab_stt": "🎙️ សំលេងទៅជាអក្សរ",
         "tab_stt_desc": "បង្ហោះ ឬថតសំឡេង ដើម្បីបំលែងវាទៅជាអក្សរ។",
         "tab_data": "📊 វិភាគទិន្នន័យ",
@@ -146,6 +187,13 @@ LANGUAGES = {
         "tab_vision": "🖼️ Vision Chat",
         "tab_vision_desc": "Upload an image and ask questions about it.",
         "tab_kb": "📂 Knowledge Base",
+        "label_gguf_dir": "📁 GGUF Model Folder (llama.cpp)",
+        "gguf_dir_placeholder": "e.g. D:\\models\\gguf — leave empty to disable",
+        "btn_scan_gguf": "🔍 Scan",
+        "gguf_scan_found": "✅ Found {n} GGUF model(s) in '{dir}' — check the model dropdowns above",
+        "gguf_scan_empty": "⚠️ No .gguf files found in '{dir}'",
+        "gguf_scan_disabled": "ℹ️ No path provided — GGUF models disabled (HuggingFace models only)",
+        "gguf_scan_no_backend": "⚠️ llama-cpp-python is not installed — GGUF models unavailable",
         "tab_stt": "🎙️ Speech to Text",
         "tab_stt_desc": "Upload or record audio to transcribe it into text.",
         "tab_data": "📊 Data Analysis",
@@ -335,23 +383,119 @@ class HardwareManager:
 # ──────────────────────────────────────────────────────────────────
 # llama.cpp (GGUF) model backend
 # ──────────────────────────────────────────────────────────────────
-LLAMA_CPP_MODEL_DIR = r"I:\llama_cpp\llamaccp_models"
+# The GGUF model folder is NOT hardcoded. It defaults to the
+# LLAMA_CPP_MODEL_DIR environment variable (empty/unset = feature off),
+# and can also be set or changed at runtime from the "📁 GGUF Model Folder"
+# box in the UI (see rescan_gguf_models()) — no code edits or restart
+# required either way.
+LLAMA_CPP_MODEL_DIR = os.environ.get("LLAMA_CPP_MODEL_DIR", "").strip()
 
 
-def discover_gguf_models(folder: str = LLAMA_CPP_MODEL_DIR) -> dict:
+def discover_gguf_models(folder: Optional[str] = None) -> dict:
     """Scan a folder for .gguf files and return {label: path} entries
-    that can be merged straight into MODEL_OPTIONS."""
+    that can be merged straight into MODEL_OPTIONS.
+
+    If `folder` is not given, the current global LLAMA_CPP_MODEL_DIR is
+    used. An empty/unset folder simply yields no GGUF models — the app
+    works fine without one.
+    """
     if not LLAMA_CPP_AVAILABLE:
+        return {}
+    folder = folder if folder is not None else LLAMA_CPP_MODEL_DIR
+    if not folder:
         return {}
     p = Path(folder)
     if not p.exists():
         return {}
+    mode_tag = "llama.cpp | GPU" if LLAMA_CPP_GPU_AVAILABLE else "llama.cpp | CPU only — slow"
     found = {}
     for f in sorted(p.glob("*.gguf")):
         size_gb = f.stat().st_size / (1024 ** 3)
-        label = f"🦙 {f.stem}  (~{size_gb:.1f} GB | llama.cpp)"
+        label = f"🦙 {f.stem}  (~{size_gb:.1f} GB | {mode_tag})"
         found[label] = str(f)
     return found
+
+
+@contextlib.contextmanager
+def _capture_native_output():
+    """Capture stdout/stderr at the OS file-descriptor level.
+
+    llama.cpp is a C/C++ library — its logging (even when llama-cpp-python's
+    `verbose=True` is set) writes directly to the process's real fd 1/2,
+    bypassing Python's `sys.stdout`/`sys.stderr` entirely. A normal
+    `contextlib.redirect_stdout` can't see it. Redirecting the actual file
+    descriptors is the only way to capture the real ggml/llama.cpp error
+    line (bad magic number, unknown architecture, missing split-file part,
+    truncated download, etc.) instead of just the generic Python wrapper
+    exception.
+    """
+    stdout_fd = sys.stdout.fileno()
+    stderr_fd = sys.stderr.fileno()
+    saved_stdout_fd = os.dup(stdout_fd)
+    saved_stderr_fd = os.dup(stderr_fd)
+    tmp = tempfile.TemporaryFile(mode="w+b")
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(tmp.fileno(), stdout_fd)
+        os.dup2(tmp.fileno(), stderr_fd)
+        yield tmp
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.dup2(saved_stdout_fd, stdout_fd)
+        os.dup2(saved_stderr_fd, stderr_fd)
+        os.close(saved_stdout_fd)
+        os.close(saved_stderr_fd)
+
+
+def _raise_gguf_load_error(model_path: str, n_ctx: int, n_gpu_layers: int,
+                            original_exc: Exception):
+    """Reload the model once more with verbose=True, capturing llama.cpp's
+    native log output, and raise a RuntimeError that includes the *real*
+    reason the load failed — instead of just the generic wrapper message
+    that verbose=False normally leaves us with.
+    """
+    diag_text = ""
+    try:
+        with _capture_native_output() as tmp:
+            try:
+                LlamaCppBackend(
+                    model_path=model_path,
+                    n_ctx=n_ctx,
+                    n_gpu_layers=n_gpu_layers,
+                    flash_attn=False,
+                    verbose=True,
+                )
+            except Exception:
+                pass  # we only care about the captured log, not this exception
+        tmp.seek(0)
+        diag_text = tmp.read().decode("utf-8", errors="replace").strip()
+        tmp.close()
+    except Exception:
+        diag_text = ""
+
+    diag_tail = "\n".join(diag_text.splitlines()[-15:]) if diag_text else \
+        "(no additional native log captured — this environment may not " \
+        "support fd-level output redirection)"
+
+    raise RuntimeError(
+        f"Failed to load GGUF model '{model_path}'.\n\n"
+        f"Real llama.cpp log from a diagnostic reload:\n"
+        f"{'-' * 60}\n{diag_tail}\n{'-' * 60}\n\n"
+        "Common causes:\n"
+        "  1. The file is corrupted or an incomplete download — check its "
+        "size against the source repo.\n"
+        "  2. It's one part of a split multi-file GGUF (e.g. "
+        "'-00001-of-00002.gguf') and the other part(s) are missing from "
+        "the folder — keep all parts together and point at part 1.\n"
+        "  3. The installed llama-cpp-python build's llama.cpp version is "
+        "too old for this model's architecture/metadata (common for newer "
+        "or uncommon MoE/hybrid-attention checkpoints) — try `pip install "
+        "llama-cpp-python --upgrade --force-reinstall` (or rerun "
+        "SETUP.bat), or re-download the file.\n\n"
+        f"Original error: {original_exc}"
+    ) from original_exc
 
 
 class LlamaCppModel:
@@ -363,21 +507,62 @@ class LlamaCppModel:
     to smolagents' CodeAgent, as the HuggingFace TransformersModel entries.
     """
 
-    def __init__(self, model_path: str, n_ctx: int = 4096,
+    def __init__(self, model_path: str, n_ctx: int = 16384,
                  n_gpu_layers: int = -1, temperature: float = 0.6,
-                 top_p: float = 0.95, max_new_tokens: int = 512):
+                 top_p: float = 0.95, max_new_tokens: int = 512,
+                 flash_attn: bool = True):
         self.model_id = model_path
         self.model_path = model_path
         self.temperature = temperature
         self.top_p = top_p
         self.max_new_tokens = max_new_tokens
-        print(f"[llama.cpp] Loading '{model_path}' (n_gpu_layers={n_gpu_layers}) …")
-        self.llm = LlamaCppBackend(
-            model_path=model_path,
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,   # -1 = offload all layers if the build supports GPU
-            verbose=False,
-        )
+        print(f"[llama.cpp] Loading '{model_path}' (n_gpu_layers={n_gpu_layers}, flash_attn={flash_attn}) …")
+        try:
+            self.llm = LlamaCppBackend(
+                model_path=model_path,
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,   # -1 = offload all layers if the build supports GPU
+                flash_attn=flash_attn,
+                verbose=False,
+            )
+        except TypeError:
+            # Installed llama-cpp-python is too old to accept flash_attn= at all
+            print("[llama.cpp] This llama-cpp-python build doesn't support the "
+                  "flash_attn parameter — loading without it.")
+            self.llm = LlamaCppBackend(
+                model_path=model_path,
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                verbose=False,
+            )
+        except Exception as e:
+            if flash_attn:
+                # Some architectures (e.g. hybrid local/global attention models
+                # with mismatched per-layer head dims) reject flash attention.
+                # Retry without it — but if THIS also fails, the problem isn't
+                # flash attention at all (e.g. an unsupported/newer GGUF
+                # architecture, a corrupted download, or a missing split-file
+                # part), so run one more diagnostic reload with verbose
+                # logging captured, and surface the real llama.cpp error
+                # instead of a confusing raw double traceback.
+                print(f"[llama.cpp] flash_attn=True failed to load ({e}); "
+                      f"retrying without flash attention …")
+                try:
+                    self.llm = LlamaCppBackend(
+                        model_path=model_path,
+                        n_ctx=n_ctx,
+                        n_gpu_layers=n_gpu_layers,
+                        flash_attn=False,
+                        verbose=False,
+                    )
+                except Exception as e2:
+                    _raise_gguf_load_error(model_path, n_ctx, n_gpu_layers, e2)
+            else:
+                # Loading without flash attention failed on the first try —
+                # still worth a diagnostic reload to surface the real reason
+                # (corrupted file, missing split part, unsupported arch, …)
+                # rather than the bare wrapper exception.
+                _raise_gguf_load_error(model_path, n_ctx, n_gpu_layers, e)
 
     @staticmethod
     def _flatten_content(content) -> str:
@@ -490,7 +675,7 @@ def _about_content_kh(device: str, version: str) -> str:
 | ឆ្លើយបែប General / RAG | ១–៥ នាទី |
 | ឆ្លើយបែប Vision | ២–៨ នាទី |
 
-> 💡 ម៉ូដែល GGUF (llama.cpp) ត្រូវបានស្កេនដោយស្វ័យប្រវត្តិពីថត `I:\\llama_cpp\\llamaccp_models` ហើយបង្ហាញនៅក្នុងបញ្ជីទម្លាក់ម៉ូដែលដូចគ្នានឹងម៉ូដែល HuggingFace។
+> 💡 ម៉ូដែល GGUF (llama.cpp) ត្រូវបានស្កេនដោយស្វ័យប្រវត្តិពីថតដែលអ្នកកំណត់ (ប្រអប់ "📁 ថតម៉ូដែល GGUF" ខាងលើ ឬអថេរបរិស្ថាន `LLAMA_CPP_MODEL_DIR`) ហើយបង្ហាញនៅក្នុងបញ្ជីទម្លាក់ម៉ូដែលដូចគ្នានឹងម៉ូដែល HuggingFace។
 """
 
 
@@ -537,22 +722,60 @@ HuggingFace (transformers) models or local GGUF models via llama.cpp.
 | General / RAG answer | 1–5 min |
 | Vision answer | 2–8 min |
 
-> 💡 GGUF (llama.cpp) models are auto-discovered from `I:\\llama_cpp\\llamaccp_models` and appear in the same model dropdown as the HuggingFace models.
+> 💡 GGUF (llama.cpp) models are auto-discovered from whatever folder you configure (the "📁 GGUF Model Folder" box above, or the `LLAMA_CPP_MODEL_DIR` environment variable) and appear in the same model dropdown as the HuggingFace models.
 """
 
-MODEL_OPTIONS = {
+BASE_MODEL_OPTIONS = {
     "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)": "Qwen/Qwen3-0.6B",
     "🟡 Qwen3-1.7B   (~3 GB RAM)":             "Qwen/Qwen3-1.7B",
     "🟡 Qwen3-4B     (~7 GB RAM)":             "Qwen/Qwen3-4B",
     "🔵 Gemma-4-E2B  (~4 GB RAM)":             "google/gemma-4-E2B-it",
 }
 
-# Merge in any local .gguf models found under LLAMA_CPP_MODEL_DIR so they
-# appear in the same dropdowns as the HuggingFace/transformers models.
+# MODEL_OPTIONS starts as a copy of the base HuggingFace models. Any local
+# .gguf models found under LLAMA_CPP_MODEL_DIR are merged in on top of it so
+# they appear in the same dropdowns. The folder is user-configurable — via
+# the LLAMA_CPP_MODEL_DIR environment variable at startup, or live from the
+# "📁 GGUF Model Folder" box in the UI (see rescan_gguf_models() below).
+MODEL_OPTIONS = dict(BASE_MODEL_OPTIONS)
 MODEL_OPTIONS.update(discover_gguf_models())
 
 DEFAULT_LLM_LABEL = "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)"
 DEFAULT_LLM_MODEL = MODEL_OPTIONS[DEFAULT_LLM_LABEL]
+
+
+def rescan_gguf_models(folder_path: Optional[str], lang_key: str = "kh"):
+    """Set (or change) the GGUF model folder at runtime and rebuild
+    MODEL_OPTIONS, without needing to edit code or restart the app.
+
+    Returns (status_message, dropdown_update) repeated for every model
+    dropdown in the UI so they all refresh with the newly discovered
+    .gguf models immediately.
+    """
+    global LLAMA_CPP_MODEL_DIR, MODEL_OPTIONS
+    l = LANGUAGES.get(lang_key, LANGUAGES["kh"])
+    folder_path = (folder_path or "").strip()
+    LLAMA_CPP_MODEL_DIR = folder_path
+
+    MODEL_OPTIONS.clear()
+    MODEL_OPTIONS.update(BASE_MODEL_OPTIONS)
+
+    if not folder_path:
+        msg = l["gguf_scan_disabled"]
+    elif not LLAMA_CPP_AVAILABLE:
+        msg = l["gguf_scan_no_backend"]
+    else:
+        found = discover_gguf_models(folder_path)
+        MODEL_OPTIONS.update(found)
+        if found:
+            msg = l["gguf_scan_found"].format(n=len(found), dir=folder_path)
+        else:
+            msg = l["gguf_scan_empty"].format(dir=folder_path)
+
+    choices = list(MODEL_OPTIONS.keys())
+    default_value = DEFAULT_LLM_LABEL if DEFAULT_LLM_LABEL in choices else (choices[0] if choices else None)
+    dd_update = gr.update(choices=choices, value=default_value)
+    return msg, dd_update, dd_update, dd_update
 
 VLM_OPTIONS = {
     "🔵 SmolVLM-256M  (~0.5 GB RAM | tiny)":  "HuggingFaceTB/SmolVLM-256M-Instruct",
@@ -659,14 +882,24 @@ def get_llm(model_id: Optional[str] = None):
         if str(target).lower().endswith(".gguf"):
             if not LLAMA_CPP_AVAILABLE:
                 raise RuntimeError(
-                    "llama-cpp-python is not installed. Run "
-                    "'pip install llama-cpp-python' (with the appropriate "
-                    "CUDA/Metal build flags for GPU support) to use GGUF models."
+                    "llama-cpp-python is not installed. Run SETUP.bat to install "
+                    "a hardware-matched build, or install it manually with the "
+                    "appropriate CUDA/Metal/ROCm build flags for GPU support."
                 )
             _llm = LlamaCppModel(
                 model_path=target,
-                n_ctx=4096,
-                n_gpu_layers=-1,          # offload all layers if the build supports GPU
+                n_ctx=16384,
+                # -1 offloads every layer to GPU; on a CPU-only llama-cpp-python
+                # build this is harmless (llama.cpp silently ignores it and runs
+                # on CPU), but we set 0 explicitly once we know for sure so the
+                # load logs are accurate instead of claiming a GPU offload that
+                # won't happen.
+                n_gpu_layers=-1 if LLAMA_CPP_GPU_AVAILABLE else 0,
+                # Flash attention only helps (and is only reliably supported)
+                # when the model is actually running on GPU; LlamaCppModel
+                # itself also falls back gracefully if a specific model's
+                # architecture rejects FA even when the GPU build supports it.
+                flash_attn=LLAMA_CPP_GPU_AVAILABLE,
                 temperature=0.6,
                 top_p=0.95,
                 max_new_tokens=MAX_NEW_TOKENS,
@@ -1530,6 +1763,19 @@ def build_ui():
                     label="🌐 Language", scale=1
                 )
 
+        # ── GGUF model folder (optional, user-configurable) ─────────
+        # No path is hardcoded — leave blank to skip GGUF entirely, or
+        # point it at any folder of .gguf files and click Scan. This can
+        # also be pre-set via the LLAMA_CPP_MODEL_DIR environment variable.
+        with gr.Row():
+            gguf_dir_tb = gr.Textbox(
+                value=LLAMA_CPP_MODEL_DIR,
+                placeholder=L["gguf_dir_placeholder"],
+                label=L["label_gguf_dir"], scale=8,
+            )
+            scan_gguf_btn = gr.Button(L["btn_scan_gguf"], scale=1)
+        gguf_scan_status = gr.Textbox(show_label=False, interactive=False)
+
         # ── Tabs ──────────────────────────────────────────────────
         with gr.Tabs():
 
@@ -1641,6 +1887,19 @@ def build_ui():
         )
 
         # ── Event handlers ────────────────────────────────────────
+
+        # GGUF model folder — rescan updates every model dropdown at once
+        scan_gguf_btn.click(
+            rescan_gguf_models,
+            [gguf_dir_tb, lang_state],
+            [gguf_scan_status, model_dd_gen, model_dd_rag, model_dd_data],
+        )
+        gguf_dir_tb.submit(
+            rescan_gguf_models,
+            [gguf_dir_tb, lang_state],
+            [gguf_scan_status, model_dd_gen, model_dd_rag, model_dd_data],
+        )
+
 
         # General Chat
         def reload_gen_fn(label):
@@ -1759,6 +2018,9 @@ def build_ui():
                 f'<div class="header-wrap"><span class="header-title">{l["title"]}</span>'
                 f'<span class="beta-badge">BETA</span></div>',
                 f'<div class="header-wrap"><span class="header-sub">{l["subtitle"].format(device=DEVICE.upper(), version=APP_VERSION)}</span></div>',
+                # GGUF model folder
+                gr.update(label=l["label_gguf_dir"], placeholder=l["gguf_dir_placeholder"]),
+                gr.update(value=l["btn_scan_gguf"]),
                 # General Chat
                 gr.update(value=l["tab_general_desc"]),
                 gr.update(placeholder=l["placeholder_gen"]),
@@ -1815,6 +2077,7 @@ def build_ui():
 
         _lang_outputs = [
             lang_state, header_title, header_sub,
+            gguf_dir_tb, scan_gguf_btn,
             # General Chat
             gen_desc, msg_gen, send_gen, model_dd_gen, reload_gen, clear_gen,
             # RAG Chat

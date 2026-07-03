@@ -15,10 +15,13 @@ accelerate>=0.30.0
 bitsandbytes>=0.43.0            # optional 4/8-bit quantisation
 
 # ── LLM / inference — llama.cpp (GGUF) backend, optional ──────────
-# For GPU offload on Windows/NVIDIA, install with:
-#   set CMAKE_ARGS=-DGGML_CUDA=on
-#   pip install llama-cpp-python --no-cache-dir
-# or grab a prebuilt CUDA wheel from https://github.com/abetlen/llama-cpp-python
+# IMPORTANT: `pip install -r requirements.txt` alone gives you the plain
+# CPU-only PyPI wheel for llama-cpp-python. For GPU acceleration (CUDA on
+# NVIDIA, HIP on AMD/ROCm) and a build that actually matches your CPU's
+# instruction set, run SETUP.bat instead — it detects your GPU, probes
+# prebuilt CUDA wheels, falls back to compiling from source with the right
+# CMAKE_ARGS if needed, and only falls back to CPU-only if nothing else works.
+# See README.md → "llama.cpp (GGUF) model support" for the manual equivalent.
 llama-cpp-python>=0.3.0
 
 # ── Vision LLM (Qwen2.5-VL, SmolVLM) ────────────────────────────
