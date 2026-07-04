@@ -1,14 +1,17 @@
 """
 ui.py — Builds the Gradio Blocks UI and wires every event handler.
 
-Layout convention used on every tab: the primary input control (message
-box, file upload, audio recorder) sits at the very top, the live chat/
-result area follows, and anything secondary — model pickers, load/unload
-buttons, status messages, generated charts/reports, the indexed-document
-table — lives inside a collapsed `gr.Accordion`. Those accordions start
-closed and pop open automatically once there's actually something to show
-(a result came back, an upload finished, etc.), instead of showing empty
-boxes before the user has done anything.
+Layout convention used on every tab that has settings: the primary input
+control (message box, file upload, audio recorder) sits at the top of the
+main (left) column, the chat/results area follows inside a `gr.Accordion`
+that starts CLOSED and pops open automatically the first time there's
+something to show — a reply came back, an upload finished, etc. Everything
+secondary (model pickers, load/unload buttons, status messages) lives in a
+narrow sidebar column to the right of the main column, instead of a
+collapsed "⚙️ Settings" accordion stacked underneath the chat like before.
+
+Tabs without a settings equivalent (Knowledge Base, About) keep their
+original single-column layout.
 
 All handlers are defined and wired at the top level of build_ui() (never
 inside a gr.render() block) — see the "Gradio 6 breaks event handler
@@ -42,6 +45,8 @@ CSS = """
 .beta-badge   { display:inline-block; font-size:0.68rem; font-weight:700; letter-spacing:0.5px;
                 color:#1a1a1a; background:#ffcc66; border-radius:999px; padding:2px 9px;
                 margin-left:6px; vertical-align:middle; }
+.tab-sidebar  { border-right:1px solid #444; padding-right:16px; margin-right:4px; }
+.sidebar-hd   { margin-top:0 !important; opacity:0.85; }
 """
 
 
@@ -97,96 +102,92 @@ def build_ui():
             # ── Tab 1: General Chat ───────────────────────────────
             with gr.Tab(L["tab_general"]) as tab_gen:
                 with gr.Row():
-                    msg_gen  = gr.Textbox(placeholder=L["placeholder_gen"], show_label=False, scale=8)
-                    send_gen = gr.Button(L["btn_send"], variant="primary", scale=1)
-                bot_gen   = gr.Chatbot(height=440)
-                clear_gen = gr.Button(L["btn_clear"], size="sm")
-                with gr.Accordion(L["accordion_settings"], open=False) as acc_gen_settings:
-                    gen_desc = gr.Markdown(L["tab_general_desc"])
-                    with gr.Row():
-                        model_dd_gen   = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"], scale=6)
-                        reload_gen     = gr.Button(L["btn_load"], size="sm", scale=2)
-                        unload_gen_btn = gr.Button(L["btn_unload"], size="sm", scale=2)
-                    reload_gen_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                    with gr.Column(scale=3, min_width=260, elem_classes=["tab-sidebar"]):
+                        gen_settings_header = gr.Markdown(f"### {L['accordion_settings']}", elem_classes=["sidebar-hd"])
+                        gen_desc = gr.Markdown(L["tab_general_desc"])
+                        model_dd_gen = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"])
+                        with gr.Row():
+                            reload_gen     = gr.Button(L["btn_load"], size="sm")
+                            unload_gen_btn = gr.Button(L["btn_unload"], size="sm")
+                        reload_gen_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                    with gr.Column(scale=7):
+                        with gr.Row():
+                            msg_gen  = gr.Textbox(placeholder=L["placeholder_gen"], show_label=False, scale=8)
+                            send_gen = gr.Button(L["btn_send"], variant="primary", scale=1)
+                        with gr.Accordion(L["accordion_chat"], open=False) as acc_gen_chat:
+                            bot_gen   = gr.Chatbot(height=440)
+                            clear_gen = gr.Button(L["btn_clear"], size="sm")
 
-            # ── Tab 2: RAG Chat (agentic — see rag_agent.py) ──────
-            with gr.Tab(L["tab_rag"]) as tab_rag:
-                with gr.Row():
-                    msg_rag  = gr.Textbox(placeholder=L["placeholder_rag"], show_label=False, scale=8)
-                    send_rag = gr.Button(L["btn_send"], variant="primary", scale=1)
-                bot_rag   = gr.Chatbot(height=440)
-                clear_rag = gr.Button(L["btn_clear"], size="sm")
-                with gr.Accordion(L["accordion_settings"], open=False) as acc_rag_settings:
-                    rag_desc = gr.Markdown(L["tab_rag_desc"])
-                    rag_agentic_chk = gr.Checkbox(
-                        label=L["label_rag_agentic"], value=True,
-                        info=L["info_rag_agentic"],
-                    )
-                    with gr.Row():
-                        model_dd_rag   = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"], scale=6)
-                        reload_rag     = gr.Button(L["btn_load"], size="sm", scale=2)
-                        unload_rag_btn = gr.Button(L["btn_unload"], size="sm", scale=2)
-                    reload_rag_out = gr.Textbox(show_label=False, interactive=False, visible=False)
-
-            # ── Tab 3: Vision Chat ────────────────────────────────
+            # ── Tab 2: Vision Chat ────────────────────────────────
             with gr.Tab(L["tab_vision"]) as tab_vis:
                 with gr.Row():
-                    msg_vis    = gr.Textbox(placeholder=L["placeholder_vis"], show_label=False, scale=6)
-                    img_upload = gr.Image(type="pil", sources=["upload", "clipboard"], scale=2)
-                    send_vis   = gr.Button(L["btn_send"], variant="primary", scale=1)
-                bot_vis   = gr.Chatbot(height=400)
-                clear_vis = gr.Button(L["btn_clear"], size="sm")
-                with gr.Accordion(L["accordion_settings"], open=False) as acc_vis_settings:
-                    vis_desc = gr.Markdown(L["tab_vision_desc"])
-                    with gr.Row():
-                        vlm_dd       = gr.Dropdown(choices=list(mr.VLM_OPTIONS.keys()), value=mr.DEFAULT_VLM_LABEL, label=L["label_vlm"], scale=5)
-                        vis_rag_chk  = gr.Checkbox(
-                            label=L["label_vis_rag"], value=False, scale=2,
+                    with gr.Column(scale=3, min_width=260, elem_classes=["tab-sidebar"]):
+                        vis_settings_header = gr.Markdown(f"### {L['accordion_settings']}", elem_classes=["sidebar-hd"])
+                        vis_desc = gr.Markdown(L["tab_vision_desc"])
+                        vlm_dd      = gr.Dropdown(choices=list(mr.VLM_OPTIONS.keys()), value=mr.DEFAULT_VLM_LABEL, label=L["label_vlm"])
+                        vis_rag_chk = gr.Checkbox(
+                            label=L["label_vis_rag"], value=False,
                             info=L["label_vis_rag_info"],
                         )
-                        load_vlm_btn = gr.Button(L["btn_load"], size="sm", scale=2)
-                        unload_vlm_btn = gr.Button(L["btn_unload"], size="sm", scale=2)
-                    load_vlm_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                        with gr.Row():
+                            load_vlm_btn   = gr.Button(L["btn_load"], size="sm")
+                            unload_vlm_btn = gr.Button(L["btn_unload"], size="sm")
+                        load_vlm_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                    with gr.Column(scale=7):
+                        with gr.Row():
+                            msg_vis    = gr.Textbox(placeholder=L["placeholder_vis"], show_label=False, scale=6)
+                            img_upload = gr.Image(type="pil", sources=["upload", "clipboard"], scale=2)
+                            send_vis   = gr.Button(L["btn_send"], variant="primary", scale=1)
+                        with gr.Accordion(L["accordion_chat"], open=False) as acc_vis_chat:
+                            bot_vis   = gr.Chatbot(height=400)
+                            clear_vis = gr.Button(L["btn_clear"], size="sm")
 
-            # ── Tab 4: Speech to Text ─────────────────────────────
+            # ── Tab 3: Speech to Text ─────────────────────────────
             with gr.Tab(L["tab_stt"]) as tab_stt:
-                stt_audio      = gr.Audio(label=L["stt_audio_label"], sources=["microphone", "upload"], type="filepath")
-                transcribe_btn = gr.Button(L["btn_transcribe"], variant="primary")
-                with gr.Accordion(f"📝 {L['label_res']}", open=False) as acc_stt_result:
-                    stt_output = gr.Textbox(label=L["label_res"], lines=8, interactive=True)
-                with gr.Accordion(L["accordion_settings"], open=False) as acc_stt_settings:
-                    stt_desc = gr.Markdown(L["tab_stt_desc"])
-                    with gr.Row():
-                        stt_dd      = gr.Dropdown(choices=list(mr.STT_OPTIONS.keys()), value=mr.DEFAULT_STT_LABEL, label=L["label_stt"], scale=5)
+                with gr.Row():
+                    with gr.Column(scale=3, min_width=260, elem_classes=["tab-sidebar"]):
+                        stt_settings_header = gr.Markdown(f"### {L['accordion_settings']}", elem_classes=["sidebar-hd"])
+                        stt_desc = gr.Markdown(L["tab_stt_desc"])
+                        stt_dd      = gr.Dropdown(choices=list(mr.STT_OPTIONS.keys()), value=mr.DEFAULT_STT_LABEL, label=L["label_stt"])
                         stt_lang_dd = gr.Dropdown(
                             choices=[("Auto-detect", "auto"), ("English", "english"), ("Khmer", "khmer"),
                                      ("French", "french"), ("Chinese", "chinese"), ("Japanese", "japanese")],
-                            value="auto", label=L["label_stt_lang"], scale=3,
+                            value="auto", label=L["label_stt_lang"],
                         )
-                        load_stt_btn = gr.Button(L["btn_load"], size="sm", scale=2)
-                        unload_stt_btn = gr.Button(L["btn_unload"], size="sm", scale=2)
-                    load_stt_out = gr.Textbox(show_label=False, interactive=False, visible=False)
-                    stt_hint = gr.Markdown(L["stt_khmer_hint"])
+                        with gr.Row():
+                            load_stt_btn   = gr.Button(L["btn_load"], size="sm")
+                            unload_stt_btn = gr.Button(L["btn_unload"], size="sm")
+                        load_stt_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                        stt_hint = gr.Markdown(L["stt_khmer_hint"])
+                    with gr.Column(scale=7):
+                        stt_audio      = gr.Audio(label=L["stt_audio_label"], sources=["microphone", "upload"], type="filepath")
+                        transcribe_btn = gr.Button(L["btn_transcribe"], variant="primary")
+                        with gr.Accordion(f"📝 {L['label_res']}", open=False) as acc_stt_result:
+                            stt_output = gr.Textbox(label=L["label_res"], lines=8, interactive=True)
 
-            # ── Tab 5: Data Analysis ──────────────────────────────
+            # ── Tab 4: Data Analysis ──────────────────────────────
             with gr.Tab(L["tab_data"]) as tab_data:
-                data_file_up = gr.File(label=L["data_file_label"], file_types=[".csv", ".xlsx", ".xls"], file_count="multiple")
                 with gr.Row():
-                    msg_data  = gr.Textbox(placeholder=L["placeholder_data"], show_label=False, scale=8)
-                    send_data = gr.Button(L["btn_send"], variant="primary", scale=1)
-                bot_data   = gr.Chatbot(height=420)
-                clear_data = gr.Button(L["btn_clear"], size="sm")
-                with gr.Accordion(L["accordion_data_results"], open=False) as acc_data_results:
-                    data_gallery     = gr.Gallery(label=L["label_charts"], columns=3, height=280)
-                    data_report_file = gr.File(label=L["label_report_file"], interactive=False)
-                with gr.Accordion(L["accordion_settings"], open=False) as acc_data_settings:
-                    data_desc = gr.Markdown(L["tab_data_desc"])
-                    with gr.Row():
-                        model_dd_data  = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"], scale=6)
-                        reset_data_btn = gr.Button(L["btn_reset_agent"], size="sm", scale=2)
-                    reset_data_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                    with gr.Column(scale=3, min_width=260, elem_classes=["tab-sidebar"]):
+                        data_settings_header = gr.Markdown(f"### {L['accordion_settings']}", elem_classes=["sidebar-hd"])
+                        data_desc = gr.Markdown(L["tab_data_desc"])
+                        model_dd_data  = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"])
+                        reset_data_btn = gr.Button(L["btn_reset_agent"], size="sm")
+                        reset_data_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                    with gr.Column(scale=7):
+                        data_file_up = gr.File(label=L["data_file_label"], file_types=[".csv", ".xlsx", ".xls"], file_count="multiple")
+                        with gr.Row():
+                            msg_data  = gr.Textbox(placeholder=L["placeholder_data"], show_label=False, scale=8)
+                            send_data = gr.Button(L["btn_send"], variant="primary", scale=1)
+                        with gr.Accordion(L["accordion_chat"], open=False) as acc_data_chat:
+                            bot_data   = gr.Chatbot(height=420)
+                            clear_data = gr.Button(L["btn_clear"], size="sm")
+                        with gr.Accordion(L["accordion_data_results"], open=False) as acc_data_results:
+                            data_gallery     = gr.Gallery(label=L["label_charts"], columns=3, height=280)
+                            data_report_file = gr.File(label=L["label_report_file"], interactive=False)
 
-            # ── Tab 6: Knowledge Base ─────────────────────────────
+            # ── Tab 5: Knowledge Base ─────────────────────────────
+            # No "⚙️ Settings" equivalent here — kept as a single column.
             with gr.Tab(L["tab_kb"]) as tab_kb:
                 with gr.Accordion(L["accordion_add"], open=True) as acc_add:
                     file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md",".docx"], file_count="multiple")
@@ -210,7 +211,30 @@ def build_ui():
                     action_msg = gr.Textbox(label="", interactive=False, lines=1, visible=False)
                 selected_rows_state = gr.State([])
 
-            # ── Tab 7: About ──────────────────────────────────────
+            # ── Tab 7: RAG Chat (agentic — see rag_agent.py) ──────
+            with gr.Tab(L["tab_rag"]) as tab_rag:
+                with gr.Row():
+                    with gr.Column(scale=3, min_width=260, elem_classes=["tab-sidebar"]):
+                        rag_settings_header = gr.Markdown(f"### {L['accordion_settings']}", elem_classes=["sidebar-hd"])
+                        rag_desc = gr.Markdown(L["tab_rag_desc"])
+                        rag_agentic_chk = gr.Checkbox(
+                            label=L["label_rag_agentic"], value=True,
+                            info=L["info_rag_agentic"],
+                        )
+                        model_dd_rag = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"])
+                        with gr.Row():
+                            reload_rag     = gr.Button(L["btn_load"], size="sm")
+                            unload_rag_btn = gr.Button(L["btn_unload"], size="sm")
+                        reload_rag_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                    with gr.Column(scale=7):
+                        with gr.Row():
+                            msg_rag  = gr.Textbox(placeholder=L["placeholder_rag"], show_label=False, scale=8)
+                            send_rag = gr.Button(L["btn_send"], variant="primary", scale=1)
+                        with gr.Accordion(L["accordion_chat"], open=False) as acc_rag_chat:
+                            bot_rag   = gr.Chatbot(height=440)
+                            clear_rag = gr.Button(L["btn_clear"], size="sm")
+
+            # ── Tab 8: About ──────────────────────────────────────
             with gr.Tab(L["tab_about"]) as tab_about:
                 about_md_kh = gr.Markdown(branding.about_content_kh(DEVICE.upper(), APP_VERSION))
                 gr.Markdown("---")
@@ -259,9 +283,16 @@ def build_ui():
             data_analysis.reset_agent()
             return gr.update(value=msg, visible=True)
 
-        msg_gen.submit(chat.chat_general,  [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
-        send_gen.click(chat.chat_general,  [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
-        clear_gen.click(lambda: ([], ""), outputs=[bot_gen, msg_gen])
+        def do_chat_general(user_message, history, model_label):
+            # Wraps chat.chat_general() to also pop the conversation
+            # accordion open the moment there's something to show — it
+            # starts collapsed on every page load.
+            history, cleared = chat.chat_general(user_message, history, model_label)
+            return history, cleared, gr.update(open=True)
+
+        msg_gen.submit(do_chat_general, [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen, acc_gen_chat])
+        send_gen.click(do_chat_general,  [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen, acc_gen_chat])
+        clear_gen.click(lambda: ([], "", gr.update(open=False)), outputs=[bot_gen, msg_gen, acc_gen_chat])
         reload_gen.click(reload_gen_fn, [model_dd_gen], [reload_gen_out])
         unload_gen_btn.click(unload_gen_fn, [lang_state], [reload_gen_out])
 
@@ -286,9 +317,13 @@ def build_ui():
             data_analysis.reset_agent()
             return gr.update(value=msg, visible=True)
 
-        msg_rag.submit(chat.chat_rag,  [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk], [bot_rag, msg_rag])
-        send_rag.click(chat.chat_rag,  [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk], [bot_rag, msg_rag])
-        clear_rag.click(lambda: ([], ""), outputs=[bot_rag, msg_rag])
+        def do_chat_rag(user_message, history, model_label, use_agentic):
+            history, cleared = chat.chat_rag(user_message, history, model_label, use_agentic)
+            return history, cleared, gr.update(open=True)
+
+        msg_rag.submit(do_chat_rag, [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk], [bot_rag, msg_rag, acc_rag_chat])
+        send_rag.click(do_chat_rag,  [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk], [bot_rag, msg_rag, acc_rag_chat])
+        clear_rag.click(lambda: ([], "", gr.update(open=False)), outputs=[bot_rag, msg_rag, acc_rag_chat])
         reload_rag.click(reload_rag_fn, [model_dd_rag], [reload_rag_out])
         unload_rag_btn.click(unload_rag_fn, [lang_state], [reload_rag_out])
 
@@ -304,9 +339,13 @@ def build_ui():
         def unload_vlm_fn(lang_key):
             return gr.update(value=models.unload_vlm_fn(lang_key), visible=True)
 
-        send_vis.click(chat.chat_vision,  [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
-        msg_vis.submit(chat.chat_vision,  [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
-        clear_vis.click(lambda: ([], None), outputs=[bot_vis, img_upload])
+        def do_chat_vision(user_message, uploaded_image, history, vlm_label, use_visual_rag):
+            history, img_reset = chat.chat_vision(user_message, uploaded_image, history, vlm_label, use_visual_rag)
+            return history, img_reset, gr.update(open=True)
+
+        send_vis.click(do_chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload, acc_vis_chat])
+        msg_vis.submit(do_chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload, acc_vis_chat])
+        clear_vis.click(lambda: ([], None, gr.update(open=False)), outputs=[bot_vis, img_upload, acc_vis_chat])
         load_vlm_btn.click(load_vlm_fn, [vlm_dd], [load_vlm_out])
         unload_vlm_btn.click(unload_vlm_fn, [lang_state], [load_vlm_out])
 
@@ -340,16 +379,17 @@ def build_ui():
 
         def do_data_analysis(files, question, model_label, history):
             history, gallery, report_file = data_analysis.run_data_analysis(files, question, model_label, history)
-            # Reveal (expand) the results accordion now that charts/report
-            # may be available — stays collapsed until an analysis runs.
-            return history, "", gallery, report_file, gr.update(open=True)
+            # Reveal (expand) both the conversation and the results
+            # accordions now that there's something in them — both stay
+            # collapsed until an analysis actually runs.
+            return history, "", gallery, report_file, gr.update(open=True), gr.update(open=True)
 
         send_data.click(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data],
-                        [bot_data, msg_data, data_gallery, data_report_file, acc_data_results])
+                        [bot_data, msg_data, data_gallery, data_report_file, acc_data_chat, acc_data_results])
         msg_data.submit(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data],
-                        [bot_data, msg_data, data_gallery, data_report_file, acc_data_results])
-        clear_data.click(lambda: ([], None, None, gr.update(open=False)),
-                         outputs=[bot_data, data_gallery, data_report_file, acc_data_results])
+                        [bot_data, msg_data, data_gallery, data_report_file, acc_data_chat, acc_data_results])
+        clear_data.click(lambda: ([], None, None, gr.update(open=False), gr.update(open=False)),
+                         outputs=[bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results])
         reset_data_btn.click(reset_data_agent_fn, outputs=[reset_data_out])
 
         # Knowledge Base
@@ -409,7 +449,8 @@ def build_ui():
                 gr.update(placeholder=l["placeholder_gen"]),
                 gr.update(value=l["btn_send"]),
                 gr.update(value=l["btn_clear"]),
-                gr.update(label=l["accordion_settings"]),
+                gr.update(label=l["accordion_chat"]),
+                gr.update(value=f"### {l['accordion_settings']}"),
                 gr.update(value=l["tab_general_desc"]),
                 gr.update(label=l["label_llm"]),
                 gr.update(value=l["btn_load"]),
@@ -418,7 +459,8 @@ def build_ui():
                 gr.update(placeholder=l["placeholder_rag"]),
                 gr.update(value=l["btn_send"]),
                 gr.update(value=l["btn_clear"]),
-                gr.update(label=l["accordion_settings"]),
+                gr.update(label=l["accordion_chat"]),
+                gr.update(value=f"### {l['accordion_settings']}"),
                 gr.update(value=l["tab_rag_desc"]),
                 gr.update(label=l["label_rag_agentic"], info=l["info_rag_agentic"]),
                 gr.update(label=l["label_llm"]),
@@ -428,7 +470,8 @@ def build_ui():
                 gr.update(placeholder=l["placeholder_vis"]),
                 gr.update(value=l["btn_send"]),
                 gr.update(value=l["btn_clear"]),
-                gr.update(label=l["accordion_settings"]),
+                gr.update(label=l["accordion_chat"]),
+                gr.update(value=f"### {l['accordion_settings']}"),
                 gr.update(value=l["tab_vision_desc"]),
                 gr.update(label=l["label_vlm"]),
                 gr.update(label=l["label_vis_rag"], info=l["label_vis_rag_info"]),
@@ -439,7 +482,7 @@ def build_ui():
                 gr.update(value=l["btn_transcribe"]),
                 gr.update(label=f"📝 {l['label_res']}"),
                 gr.update(label=l["label_res"]),
-                gr.update(label=l["accordion_settings"]),
+                gr.update(value=f"### {l['accordion_settings']}"),
                 gr.update(value=l["tab_stt_desc"]),
                 gr.update(label=l["label_stt"]),
                 gr.update(label=l["label_stt_lang"]),
@@ -451,10 +494,11 @@ def build_ui():
                 gr.update(placeholder=l["placeholder_data"]),
                 gr.update(value=l["btn_send"]),
                 gr.update(value=l["btn_clear"]),
+                gr.update(label=l["accordion_chat"]),
                 gr.update(label=l["accordion_data_results"]),
                 gr.update(label=l["label_charts"]),
                 gr.update(label=l["label_report_file"]),
-                gr.update(label=l["accordion_settings"]),
+                gr.update(value=f"### {l['accordion_settings']}"),
                 gr.update(value=l["tab_data_desc"]),
                 gr.update(label=l["label_llm"]),
                 gr.update(value=l["btn_reset_agent"]),
@@ -477,17 +521,17 @@ def build_ui():
             lang_state, header_title, header_sub,
             gguf_dir_tb, scan_gguf_btn,
             # General Chat
-            msg_gen, send_gen, clear_gen, acc_gen_settings, gen_desc, model_dd_gen, reload_gen, unload_gen_btn,
+            msg_gen, send_gen, clear_gen, acc_gen_chat, gen_settings_header, gen_desc, model_dd_gen, reload_gen, unload_gen_btn,
             # RAG Chat
-            msg_rag, send_rag, clear_rag, acc_rag_settings, rag_desc, rag_agentic_chk, model_dd_rag, reload_rag, unload_rag_btn,
+            msg_rag, send_rag, clear_rag, acc_rag_chat, rag_settings_header, rag_desc, rag_agentic_chk, model_dd_rag, reload_rag, unload_rag_btn,
             # Vision Chat
-            msg_vis, send_vis, clear_vis, acc_vis_settings, vis_desc, vlm_dd, vis_rag_chk, load_vlm_btn, unload_vlm_btn,
+            msg_vis, send_vis, clear_vis, acc_vis_chat, vis_settings_header, vis_desc, vlm_dd, vis_rag_chk, load_vlm_btn, unload_vlm_btn,
             # STT
-            stt_audio, transcribe_btn, acc_stt_result, stt_output, acc_stt_settings, stt_desc,
+            stt_audio, transcribe_btn, acc_stt_result, stt_output, stt_settings_header, stt_desc,
             stt_dd, stt_lang_dd, load_stt_btn, unload_stt_btn, stt_hint,
             # Data Analysis
-            data_file_up, msg_data, send_data, clear_data, acc_data_results, data_gallery, data_report_file,
-            acc_data_settings, data_desc, model_dd_data, reset_data_btn,
+            data_file_up, msg_data, send_data, clear_data, acc_data_chat, acc_data_results, data_gallery, data_report_file,
+            data_settings_header, data_desc, model_dd_data, reset_data_btn,
             # Knowledge Base
             acc_add, file_up, vis_ret_dd, up_btn, unload_visual_btn, up_msg,
             acc_kb_docs, refresh_btn, delete_sel_btn, clear_all_btn,
@@ -497,7 +541,16 @@ def build_ui():
 
         lang_dropdown.change(switch_lang, [lang_dropdown], _lang_outputs)
 
-        # Initialise to Khmer on load
-        demo.load(lambda: switch_lang("Khmer"), outputs=_lang_outputs)
+        # NOTE: no demo.load() re-initializer here. Every component above
+        # is already created with the correct Khmer text/value via `L`
+        # (e.g. label=L["label_llm"], placeholder=L["placeholder_gen"]),
+        # so a startup call re-pushing the same Khmer values into all 68
+        # components across every tab is redundant — and firing that many
+        # updates into tabs the browser hasn't finished mounting yet (any
+        # tab other than the default-active one) can leave those
+        # components stuck showing a perpetual loading state. Only
+        # lang_dropdown.change() needs to touch all of them, and that only
+        # runs after the user explicitly switches languages, well after
+        # the initial page mount has finished.
 
         return demo

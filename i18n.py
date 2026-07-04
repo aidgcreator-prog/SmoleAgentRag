@@ -8,9 +8,10 @@ LANGUAGES = {
     "kh": {
         "title": "🤖 ជំនួយការ AI ពហុមុខងារ",
         "subtitle": (
-            'ដោយ LocalAiLab · smolagents · ChromaDB · {device} · កំណែ {version} · '
-            '<a href="https://youtube.com/@localailabkh" target="_blank">📺 យូធូបឆាណែល</a>'
+            'ដោយ LocalAiLab· កំណែ {version} · '
+            '<a href="https://youtube.com/@localailabkh" target="_blank">📺 យូធូបឆាណែល សំរាប់ការនែណាំ </a>'
         ),
+        "accordion_chat": "💬 សន្ទនា",
         "tab_general": "💬 ការសន្ទនាទូទៅ",
         "tab_general_desc": "ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយកទិន្នន័យឡើយ។",
         "tab_rag": "📚 វិភាគឯកសារ",
@@ -106,6 +107,7 @@ LANGUAGES = {
     "en": {
         "title": "🤖 Multipurpose AI Assistant",
         "subtitle": "by LocalAiLab · smolagents · ChromaDB · {device} · v{version}",
+        "accordion_chat": "💬 Conversation",
         "tab_general": "💬 General Chat",
         "tab_general_desc": "Direct conversation with the LLM — no retrieval.",
         "tab_rag": "📚 RAG Chat",

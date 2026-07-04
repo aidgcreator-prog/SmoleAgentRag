@@ -40,6 +40,7 @@ SMOL_VLM_IDS = {"HuggingFaceTB/SmolVLM-256M-Instruct", "HuggingFaceTB/SmolVLM-50
 # LLM (HuggingFace + GGUF) options
 # ──────────────────────────────────────────────────────────────────
 BASE_MODEL_OPTIONS = {
+    "🟢 Ornith-1.0-9B   (~1.2 GB RAM | fastest)": "deepreinforce-ai/Ornith-1.0-9B",
     "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)": "Qwen/Qwen3-0.6B",
     "🟡 Qwen3-1.7B   (~3 GB RAM)":             "Qwen/Qwen3-1.7B",
     "🟡 Qwen3-4B     (~7 GB RAM)":             "Qwen/Qwen3-4B",

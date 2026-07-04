@@ -348,6 +348,38 @@ def get_stt_pipeline(model_id: Optional[str] = None):
             chunk_length_s=30,
             stride_length_s=5,
         )
+        if hasattr(_stt_pipeline, "model") and hasattr(_stt_pipeline.model, "generation_config"):
+            gen_cfg = _stt_pipeline.model.generation_config
+            gen_cfg.forced_decoder_ids = None
+
+            # Some community Whisper fine-tunes (e.g. the Khmer-tuned
+            # checkpoints in STT_OPTIONS) ship a generation_config.json
+            # predating transformers' current language-forcing mechanism —
+            # it's missing lang_to_id/task_to_id, which makes
+            # generate(language=...) raise "generation config is outdated"
+            # the moment a specific language (not auto-detect) is picked.
+            # Patch the missing multilingual mapping in from the matching
+            # stock openai/whisper checkpoint of the same size — same
+            # tokenizer/architecture, so the mapping is valid — instead of
+            # only discovering this the first time someone picks a language.
+            if getattr(gen_cfg, "lang_to_id", None) is None:
+                try:
+                    from transformers import GenerationConfig
+                    size_hint = next(
+                        (s for s in ("large-v3", "large-v2", "large", "medium", "small", "base", "tiny")
+                         if s in target.lower()),
+                        "small",
+                    )
+                    base_id  = f"openai/whisper-{size_hint}"
+                    base_cfg = GenerationConfig.from_pretrained(base_id)
+                    for attr in ("lang_to_id", "task_to_id", "is_multilingual"):
+                        if hasattr(base_cfg, attr):
+                            setattr(gen_cfg, attr, getattr(base_cfg, attr))
+                    gen_cfg.forced_decoder_ids = None
+                    print(f"[STT] '{target}' had an outdated generation_config — "
+                          f"patched language mapping from '{base_id}'.")
+                except Exception as e:
+                    print(f"[STT] Could not patch outdated generation_config for '{target}': {e}")
         _stt_model_id = target
         return _stt_pipeline
 
@@ -386,7 +418,19 @@ def transcribe_audio(audio_path: Optional[str], language: Optional[str] = None,
             import librosa
             audio_array = librosa.resample(audio_array, orig_sr=src_sr, target_sr=target_sr)
 
-        result = asr({"array": audio_array, "sampling_rate": target_sr}, generate_kwargs=gen_kwargs)
+        try:
+            result = asr({"array": audio_array, "sampling_rate": target_sr}, generate_kwargs=gen_kwargs)
+        except ValueError as e:
+            # Belt-and-braces: if the generation_config patch in
+            # get_stt_pipeline() didn't apply (e.g. a different checkpoint
+            # hits the same issue in the future), don't crash the whole
+            # transcription just because a *specific* language was
+            # requested — retry once with auto language detection instead.
+            if gen_kwargs and "generation config is outdated" in str(e):
+                print(f"[STT] Forced language failed ({e}); retrying with auto-detect …")
+                result = asr({"array": audio_array, "sampling_rate": target_sr})
+            else:
+                raise
         text = result.get("text", "") if isinstance(result, dict) else str(result)
         return text.strip()
     except Exception as e:
