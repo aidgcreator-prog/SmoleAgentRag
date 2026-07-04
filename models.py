@@ -21,6 +21,57 @@ _embed_model         = None
 _chroma_col          = None
 _llm                 = None
 _llm_model_id        = mr.DEFAULT_LLM_MODEL
+
+# ──────────────────────────────────────────────────────────────────
+# Some newer HuggingFace checkpoints ship architectures that only
+# `transformers` releases from a certain version onward know how to
+# build (as opposed to older custom-arch models that ship their own
+# `trust_remote_code` modeling file and work on any transformers
+# version). deepreinforce-ai/Ornith-1.0-9B is one of these: it's a
+# Qwen3.5 hybrid linear-/full-attention ("qwen35") architecture that
+# requires transformers >= 5.8.1 to even recognize the config class —
+# on an older install this fails with a confusing
+# "Unrecognized configuration class" / KeyError deep inside
+# AutoModelForCausalLM.from_pretrained() instead of a clear message.
+# Keyed by the model ids in model_registry.ORNITH_IDS so this stays a
+# single source of truth if more Ornith-family models are added later.
+# ──────────────────────────────────────────────────────────────────
+_MIN_TRANSFORMERS_VERSION = {
+    "ornith": "5.8.1",
+}
+
+
+def _version_tuple(version_str: str) -> tuple:
+    """Parse a dotted version string into a comparable tuple of ints,
+    ignoring any non-numeric suffix (e.g. 'dev0', 'rc1') per component."""
+    parts = []
+    for p in str(version_str).split(".")[:3]:
+        digits = "".join(ch for ch in p if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def _check_transformers_version_for(model_id: str) -> None:
+    """Raise a clear, actionable RuntimeError if the installed
+    `transformers` version is too old to load `model_id`, instead of
+    letting a cryptic internal AutoModel error surface first."""
+    if model_id not in mr.ORNITH_IDS:
+        return
+    min_version = _MIN_TRANSFORMERS_VERSION["ornith"]
+    import transformers as _tf
+    installed = getattr(_tf, "__version__", "0")
+    if _version_tuple(installed) < _version_tuple(min_version):
+        raise RuntimeError(
+            f"'{model_id}' needs transformers >= {min_version} — it's a "
+            f"Qwen3.5 hybrid linear-/full-attention architecture that older "
+            f"transformers releases don't recognize. You have {installed} "
+            f"installed.\n\n"
+            f"Upgrade with:\n"
+            f'  pip install --upgrade "transformers>={min_version}"\n\n'
+            f"Then restart the app and try loading the model again."
+        )
 _vlm_model           = None
 _vlm_processor       = None
 _vlm_model_id        = None
@@ -162,17 +213,36 @@ def get_llm(model_id: Optional[str] = None):
                 max_new_tokens=mr.MAX_NEW_TOKENS,
             )
         else:
+            _check_transformers_version_for(target)
             from smolagents import TransformersModel
             print(f"[RAG] Loading LLM '{target}' on {DEVICE.upper()} …")
-            _llm = TransformersModel(
-                model_id=target,
-                device_map=DEVICE,
-                torch_dtype=TORCH_DTYPE,
-                max_new_tokens=mr.MAX_NEW_TOKENS,
-                temperature=0.6,
-                top_p=0.95,
-                trust_remote_code=True,
-            )
+            try:
+                _llm = TransformersModel(
+                    model_id=target,
+                    device_map=DEVICE,
+                    dtype=TORCH_DTYPE,
+                    max_new_tokens=mr.MAX_NEW_TOKENS,
+                    temperature=0.6,
+                    top_p=0.95,
+                    trust_remote_code=True,
+                )
+            except TypeError:
+                # Older transformers/smolagents combos don't accept the
+                # newer `dtype=` kwarg name yet — fall back to the
+                # long-standing `torch_dtype=` name. (transformers >=5.x
+                # renamed torch_dtype -> dtype in from_pretrained();
+                # smolagents' TransformersModel forwards whichever kwargs
+                # it's given straight through, so pass whichever name the
+                # installed version actually accepts.)
+                _llm = TransformersModel(
+                    model_id=target,
+                    device_map=DEVICE,
+                    torch_dtype=TORCH_DTYPE,
+                    max_new_tokens=mr.MAX_NEW_TOKENS,
+                    temperature=0.6,
+                    top_p=0.95,
+                    trust_remote_code=True,
+                )
         _llm_model_id = target
         return _llm
 

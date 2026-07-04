@@ -35,14 +35,17 @@ ALL_QWEN_IDS = QWEN3_IDS | QWEN36_IDS
 QWEN_VL_IDS  = {"Qwen/Qwen2.5-VL-3B-Instruct", "Qwen/Qwen2.5-VL-7B-Instruct"}
 SMOL_VLM_IDS = {"HuggingFaceTB/SmolVLM-256M-Instruct", "HuggingFaceTB/SmolVLM-500M-Instruct",
                 "HuggingFaceTB/SmolVLM2-2.2B-Instruct"}
+ORNITH_IDS = {
+    "deepreinforce-ai/Ornith-1.0-9B",
+}
 
 # ──────────────────────────────────────────────────────────────────
 # LLM (HuggingFace + GGUF) options
 # ──────────────────────────────────────────────────────────────────
 BASE_MODEL_OPTIONS = {
-    "🟢 Ornith-1.0-9B   (~1.2 GB RAM | fastest)": "deepreinforce-ai/Ornith-1.0-9B",
     "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)": "Qwen/Qwen3-0.6B",
     "🟡 Qwen3-1.7B   (~3 GB RAM)":             "Qwen/Qwen3-1.7B",
+    "🟠 Qwen2.5-Coder-3B (~6 GB RAM | small coding/agent model)": "Qwen/Qwen2.5-Coder-3B-Instruct",
     "🟡 Qwen3-4B     (~7 GB RAM)":             "Qwen/Qwen3-4B",
     "🔵 Gemma-4-E2B  (~4 GB RAM)":             "google/gemma-4-E2B-it",
 }
