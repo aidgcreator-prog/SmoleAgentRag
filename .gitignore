@@ -1,26 +1,59 @@
-# Python Virtual Environment
+# ------------------------
+# Python Virtual Environments
+# ------------------------
 .venv/
 venv/
 ENV/
+env/
 
+# ------------------------
 # Python Cache
+# ------------------------
 __pycache__/
 *.py[cod]
 *$py.class
 
-# ChromaDB & Visual Index (Persistent Data)
+# Distribution / Build
+build/
+dist/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ------------------------
+# Environment Variables
+# ------------------------
+.env
+
+# ------------------------
+# Vector Databases / AI Data
+# ------------------------
 chroma_db/
 visual_index/
 
-# OS specific
-.DS_Store
-Thumbs.db
-
-# Local environment files
-.env
-.venv
-```
-
+# ------------------------
+# Project-specific
+# ------------------------
 old_files/
 data_analysis/
 .claude/
+user_config.json
+.user_config.json
+
+# ------------------------
+# Operating System
+# ------------------------
+.DS_Store
+Thumbs.db
+
+# ------------------------
+# IDEs
+# ------------------------
+.vscode/
+.idea/

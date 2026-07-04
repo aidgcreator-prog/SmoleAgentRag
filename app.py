@@ -1,5 +1,6 @@
 """
-RAG Agent - smolagents + ChromaDB + Dynamic Hardware Support + Gradio UI
+Multipurpose AI Assistant — by LocalAiLab
+smolagents + ChromaDB + Dynamic Hardware Support + Gradio UI
 =======================================================================
 Tabs:
   💬 General Chat  — direct LLM conversation, no retrieval
@@ -11,6 +12,7 @@ Tabs:
 
 import os
 import gc
+import json
 import warnings
 import time
 import threading
@@ -72,28 +74,16 @@ if LLAMA_CPP_AVAILABLE:
     print(f"[llama.cpp] GPU offload support: "
           f"{'available' if LLAMA_CPP_GPU_AVAILABLE else 'NOT available (CPU-only build — GGUF models will run on CPU)'}")
 
-with open("image/logo.jpg", "rb") as f:
-    logo_b64 = base64.b64encode(f.read()).decode()
-
 # ──────────────────────────────────────────────────────────────────
 # Localization (i18n)
 # ──────────────────────────────────────────────────────────────────
 LANGUAGES = {
     "kh": {
-        "title": f"""
-        <div style="display:flex;align-items:center;justify-content:center;gap:15px;margin-bottom:10px;">
-            <img src="data:image/jpeg;base64,{logo_b64}"
-                alt="LocalAiLab Logo"
-                style="width:80px;height:80px;border-radius:15px;">
-            <div>
-                <h2 style="margin:0;">បង្កើតដោយ LocalAiLab</h2>
-                <a href="https://youtube.com/@localailabkh" target="_blank">
-                    📺 LocalAiLab យូធូបឆាណែល
-                </a>
-            </div>
-        </div>
-        """,
-        "subtitle": "🔍 LocalAiLab · កំណែ {version}",
+        "title": "🤖 ជំនួយការ AI ពហុមុខងារ",
+        "subtitle": (
+            'ដោយ LocalAiLab · smolagents · ChromaDB · {device} · កំណែ {version} · '
+            '<a href="https://youtube.com/@localailabkh" target="_blank">📺 យូធូបឆាណែល</a>'
+        ),
         "tab_general": "💬 ការសន្ទនាទូទៅ",
         "tab_general_desc": "ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយកទិន្នន័យឡើយ។",
         "tab_rag": "📚 វិភាគឯកសារ",
@@ -123,6 +113,9 @@ LANGUAGES = {
         "placeholder_vis": "សួរអំពីរូបភាព...",
         "btn_send": "ផ្ញើ ▶",
         "btn_load": "🔄 ទាញយក",
+        "btn_unload": "🧹 ដោះស្រាយពី VRAM",
+        "btn_unload_none": "ℹ️ គ្មានម៉ូដែលកំពុងផ្ទុកទេ។",
+        "msg_unloaded": "🧹 '{model}' ត្រូវបានដោះស្រាយ — VRAM ទំនេរឡើងវិញ។",
         "btn_clear": "🗑️ សម្អាត",
         "btn_index": "📥 បញ្ចូលឯកសារ",
         "btn_refresh": "🔄 បញ្ជូនឡើងវិញ",
@@ -135,7 +128,8 @@ LANGUAGES = {
         "stt_khmer_hint": "💡 សម្រាប់ភាពត្រឹមត្រូវជាភាសាខ្មែរ សូមជ្រើសរើសម៉ូដែល 🇰🇭 ដែលបានបណ្តុះបណ្តាលជាពិសេសសម្រាប់ភាសាខ្មែរ ខាងលើ។ ម៉ូដែល Whisper ធម្មតាមានទិន្នន័យបណ្តុះបណ្តាលភាសាខ្មែរតិចតួច។",
         "btn_transcribe": "📝 បំលែងជាអក្សរ",
         "stt_audio_label": "ថត ឬបង្ហោះសំឡេង",
-        "label_vis_rag": "🔍 ក៏ទាញយកបរិបទអត្ថបទផងដែរ",
+        "label_vis_rag": "🔍 ក៏ស្វែងរករូបភាពពាក់ព័ន្ធពី Visual Index (Visual RAG)",
+        "label_vis_rag_info": "ត្រូវការឯកសារ PDF ដែលបានបញ្ចូលជា Visual Index ជាមុនសិន (ផ្ទាំង 📂) — បើគ្មានទេ វានឹងមិនរកឃើញរូបភាពណាមួយឡើយ។ បរិបទអត្ថបទត្រូវបានទាញយកជានិច្ច ដោយមិនអាស្រ័យលើប្រអប់នេះ។",
         "label_vis_ret": "🖼️ អ្នកទាញយកចក្ខុវិស័យ (PDFs)",
         "label_res": "លទ្ធផល",
         "doc_table_headers": ["ប្រភព", "ប្រភេទ", "ទំព័រ", "ចំនួន Chunk"],
@@ -179,8 +173,8 @@ LANGUAGES = {
         "err_elapsed": "⏱ {elapsed:.1f}s | model: <code>{model}</code> ({dev})"
     },
     "en": {
-        "title": "🔍 RAG Agent",
-        "subtitle": "smolagents · ChromaDB · Gemma4 / Qwen3.6 · {device} · v{version} · Developed by LocalAiLab",
+        "title": "🤖 Multipurpose AI Assistant",
+        "subtitle": "by LocalAiLab · smolagents · ChromaDB · {device} · v{version}",
         "tab_general": "💬 General Chat",
         "tab_general_desc": "Direct conversation with the LLM — no retrieval.",
         "tab_rag": "📚 RAG Chat",
@@ -210,6 +204,9 @@ LANGUAGES = {
         "placeholder_vis": "Ask about the image ...",
         "btn_send": "Send ▶",
         "btn_load": "🔄 Load",
+        "btn_unload": "🧹 Unload from VRAM",
+        "btn_unload_none": "ℹ️ No model currently loaded.",
+        "msg_unloaded": "🧹 '{model}' unloaded — VRAM freed.",
         "btn_clear": "🗑️ Clear",
         "btn_index": "📥 Index files",
         "btn_refresh": "🔄 Refresh",
@@ -222,7 +219,8 @@ LANGUAGES = {
         "stt_khmer_hint": "💡 For better Khmer accuracy, choose one of the 🇰🇭 Khmer-tuned models above. Vanilla Whisper models only saw a small amount of Khmer during training.",
         "btn_transcribe": "📝 Transcribe",
         "stt_audio_label": "Record or upload audio",
-        "label_vis_rag": "🔍 Also retrieve text context",
+        "label_vis_rag": "🔍 Also search visual index for related images (Visual RAG)",
+        "label_vis_rag_info": "Requires PDFs already indexed into the Visual Index first (📂 tab) — otherwise no images will be found. Text context is always retrieved regardless of this box.",
         "label_vis_ret": "🖼️ Visual retriever (PDFs)",
         "label_res": "Result",
         "doc_table_headers": ["Source", "Type", "Pages", "Chunks"],
@@ -382,14 +380,49 @@ class HardwareManager:
 
 
 # ──────────────────────────────────────────────────────────────────
+# Persisted user config (survives app restarts)
+# ──────────────────────────────────────────────────────────────────
+# Currently only stores the GGUF model folder path, so the user only has
+# to type/scan it once instead of every time the app starts.
+USER_CONFIG_PATH = Path(__file__).parent / "user_config.json"
+
+
+def _load_user_config() -> dict:
+    try:
+        if USER_CONFIG_PATH.exists():
+            return json.loads(USER_CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[Config] Could not read '{USER_CONFIG_PATH}': {e}")
+    return {}
+
+
+def _save_user_config(updates: dict) -> None:
+    try:
+        data = _load_user_config()
+        data.update(updates)
+        USER_CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[Config] Could not write '{USER_CONFIG_PATH}': {e}")
+
+
+_USER_CONFIG = _load_user_config()
+
+# ──────────────────────────────────────────────────────────────────
 # llama.cpp (GGUF) model backend
 # ──────────────────────────────────────────────────────────────────
-# The GGUF model folder is NOT hardcoded. It defaults to the
-# LLAMA_CPP_MODEL_DIR environment variable (empty/unset = feature off),
-# and can also be set or changed at runtime from the "📁 GGUF Model Folder"
+# The GGUF model folder is NOT hardcoded. Resolution order:
+#   1. LLAMA_CPP_MODEL_DIR environment variable, if set (highest priority —
+#      lets you override per-launch without touching saved settings)
+#   2. The path remembered from a previous run (user_config.json), so the
+#      user is only asked for it once instead of on every startup
+#   3. Empty (feature off) if neither is set
+# It can also be set or changed at runtime from the "📁 GGUF Model Folder"
 # box in the UI (see rescan_gguf_models()) — no code edits or restart
-# required either way.
-LLAMA_CPP_MODEL_DIR = os.environ.get("LLAMA_CPP_MODEL_DIR", "").strip()
+# required either way, and doing so updates user_config.json immediately.
+LLAMA_CPP_MODEL_DIR = (
+    os.environ.get("LLAMA_CPP_MODEL_DIR", "").strip()
+    or str(_USER_CONFIG.get("gguf_model_dir", "")).strip()
+)
 
 
 def discover_gguf_models(folder: Optional[str] = None) -> dict:
@@ -626,6 +659,8 @@ def _load_logo_b64() -> str:
 
 DEVELOPER_LOGO_B64 = _load_logo_b64()
 DEVELOPER_NAME = "LocalAiLab"
+APP_NAME_EN = "Multipurpose AI Assistant"
+APP_NAME_KH = "ជំនួយការ AI ពហុមុខងារ"
 APP_VERSION = "1.2.0-beta"
 
 # ──────────────────────────────────────────────────────────────────
@@ -635,11 +670,11 @@ APP_VERSION = "1.2.0-beta"
 # ──────────────────────────────────────────────────────────────────
 def _about_content_kh(device: str, version: str) -> str:
     return f"""
-### 🔖 កំណែ {version}
+### 🔖 {APP_NAME_KH} — កំណែ {version}
 
-ភ្នាក់ងារ RAG មូលដ្ឋាន ពហុភាសា (ខ្មែរ/អង់គ្លេស) និងពហុម៉ូដាល — សន្ទនាទូទៅ វិភាគឯកសារតាមរយៈ RAG យល់ដឹងរូបភាព
+ជំនួយការ AI ពហុមុខងារ ដែលដំណើរការនៅលើកុំព្យូទ័ររបស់អ្នកផ្ទាល់ ពហុភាសា (ខ្មែរ/អង់គ្លេស) និងពហុម៉ូដាល — សន្ទនាទូទៅ វិភាគឯកសារតាមរយៈ RAG យល់ដឹងរូបភាព
 បំលែងសំឡេងទៅជាអក្សរ វិភាគទិន្នន័យ CSV/Excel ដោយ AI Agent និងគ្រប់គ្រងមូលដ្ឋានចំណេះដឹង — ដំណើរការទាំងស្រុងនៅលើកុំព្យូទ័ររបស់អ្នក
-ដោយប្រើម៉ូដែល HuggingFace (transformers) ឬម៉ូដែលមូលដ្ឋាន GGUF តាមរយៈ llama.cpp។
+ដោយប្រើម៉ូដែល HuggingFace (transformers) ឬម៉ូដែលមូលដ្ឋាន GGUF តាមរយៈ llama.cpp។ បង្កើតដោយ LocalAiLab។
 
 ---
 
@@ -682,11 +717,11 @@ def _about_content_kh(device: str, version: str) -> str:
 
 def _about_content_en(device: str, version: str) -> str:
     return f"""
-### 🔖 Version {version}
+### 🔖 {APP_NAME_EN} — Version {version}
 
-A local, bilingual (Khmer/English), multi-modal RAG agent — general chat, document RAG, vision chat, speech-to-text,
+A local, bilingual (Khmer/English), multi-modal AI assistant — general chat, document RAG, vision chat, speech-to-text,
 AI-driven CSV/Excel data analysis, and knowledge base management — running entirely on your own machine, using either
-HuggingFace (transformers) models or local GGUF models via llama.cpp.
+HuggingFace (transformers) models or local GGUF models via llama.cpp. Built by LocalAiLab.
 
 ---
 
@@ -757,6 +792,10 @@ def rescan_gguf_models(folder_path: Optional[str], lang_key: str = "kh"):
     l = LANGUAGES.get(lang_key, LANGUAGES["kh"])
     folder_path = (folder_path or "").strip()
     LLAMA_CPP_MODEL_DIR = folder_path
+
+    # Remember it (or remember that it was cleared) so the user isn't asked
+    # again on the next startup — SETUP.bat/RUN.bat only need this once.
+    _save_user_config({"gguf_model_dir": folder_path})
 
     MODEL_OPTIONS.clear()
     MODEL_OPTIONS.update(BASE_MODEL_OPTIONS)
@@ -1390,6 +1429,12 @@ def index_pdf_visual(filepath: str, retriever_id: str) -> str:
 
 
 def visual_retrieve(query: str, top_k: int = 3) -> list:
+    # Nothing has been indexed into the visual (image-based PDF) index yet —
+    # skip entirely instead of loading the ~2-8 GB retriever model just to
+    # hit "No passages provided". This is the normal state until the user
+    # indexes at least one PDF from the Knowledge Base tab.
+    if not (Path(VISUAL_INDEX_DIR) / "main").exists():
+        return []
     retriever = get_visual_retriever()
     if retriever is None:
         return []
@@ -1804,11 +1849,71 @@ def fix_system_ui_generator():
         )
 
 
+
+# ──────────────────────────────────────────────────────────────────
+# Explicit "force unload / offload from VRAM" actions — one per model
+# type, wired to an "Unload from VRAM" button on each relevant tab.
+# These free memory immediately via _release_model() without loading
+# any replacement, unlike get_llm()/get_vlm()/get_stt_pipeline() which
+# only release the *previous* model right before loading a new one.
+# ──────────────────────────────────────────────────────────────────
+def unload_llm_fn(lang_key: str = "kh") -> str:
+    global _llm, _llm_model_id, _data_agent, _data_agent_model_id
+    l = LANGUAGES.get(lang_key, LANGUAGES["kh"])
+    if _llm is None:
+        return l["btn_unload_none"]
+    mid = _llm_model_id
+    _release_model(_llm)
+    _llm = None
+    # The data-analysis agent holds its own reference to this same LLM —
+    # drop it too so it doesn't keep the just-unloaded model alive.
+    _data_agent = None
+    _data_agent_model_id = None
+    return l["msg_unloaded"].format(model=mid)
+
+
+def unload_vlm_fn(lang_key: str = "kh") -> str:
+    global _vlm_model, _vlm_processor, _vlm_model_id
+    l = LANGUAGES.get(lang_key, LANGUAGES["kh"])
+    if _vlm_model is None:
+        return l["btn_unload_none"]
+    mid = _vlm_model_id
+    _release_model(_vlm_model)
+    _vlm_model = None
+    _vlm_processor = None
+    _vlm_model_id = None
+    return l["msg_unloaded"].format(model=mid)
+
+
+def unload_stt_fn(lang_key: str = "kh") -> str:
+    global _stt_pipeline, _stt_model_id
+    l = LANGUAGES.get(lang_key, LANGUAGES["kh"])
+    if _stt_pipeline is None:
+        return l["btn_unload_none"]
+    mid = _stt_model_id
+    _release_model(_stt_pipeline)
+    _stt_pipeline = None
+    _stt_model_id = None
+    return l["msg_unloaded"].format(model=mid)
+
+
+def unload_visual_retriever_fn(lang_key: str = "kh") -> str:
+    global _visual_retriever, _visual_retriever_id
+    l = LANGUAGES.get(lang_key, LANGUAGES["kh"])
+    if _visual_retriever is None:
+        return l["btn_unload_none"]
+    mid = _visual_retriever_id or DEFAULT_VISUAL_RETRIEVER
+    _release_model(_visual_retriever)
+    _visual_retriever = None
+    _visual_retriever_id = None
+    return l["msg_unloaded"].format(model=mid)
+
+
 def build_ui():
     # Start with Khmer as default
     L = LANGUAGES["kh"]
 
-    with gr.Blocks(title="🔍 RAG Agent") as demo:
+    with gr.Blocks(title=f"🤖 {APP_NAME_EN} — LocalAiLab") as demo:
         lang_state = gr.State("kh")
 
         # ── Header ────────────────────────────────────────────────
@@ -1862,6 +1967,7 @@ def build_ui():
                 with gr.Row():
                     model_dd_gen   = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label=L["label_llm"], scale=6)
                     reload_gen     = gr.Button(L["btn_load"], size="sm", scale=2)
+                    unload_gen_btn = gr.Button(L["btn_unload"], size="sm", scale=2)
                     reload_gen_out = gr.Textbox(show_label=False, interactive=False, scale=4)
                 clear_gen = gr.Button(L["btn_clear"], size="sm")
 
@@ -1875,6 +1981,7 @@ def build_ui():
                 with gr.Row():
                     model_dd_rag   = gr.Dropdown(choices=list(MODEL_OPTIONS.keys()), value=DEFAULT_LLM_LABEL, label=L["label_llm"], scale=6)
                     reload_rag     = gr.Button(L["btn_load"], size="sm", scale=2)
+                    unload_rag_btn = gr.Button(L["btn_unload"], size="sm", scale=2)
                     reload_rag_out = gr.Textbox(show_label=False, interactive=False, scale=4)
                 clear_rag = gr.Button(L["btn_clear"], size="sm")
 
@@ -1888,8 +1995,12 @@ def build_ui():
                     send_vis   = gr.Button(L["btn_send"], variant="primary", scale=1)
                 with gr.Row():
                     vlm_dd       = gr.Dropdown(choices=list(VLM_OPTIONS.keys()), value=DEFAULT_VLM_LABEL, label=L["label_vlm"], scale=5)
-                    vis_rag_chk  = gr.Checkbox(label=L["label_vis_rag"], value=True, scale=2)
+                    vis_rag_chk  = gr.Checkbox(
+                        label=L["label_vis_rag"], value=False, scale=2,
+                        info=L["label_vis_rag_info"],
+                    )
                     load_vlm_btn = gr.Button(L["btn_load"], size="sm", scale=2)
+                    unload_vlm_btn = gr.Button(L["btn_unload"], size="sm", scale=2)
                     load_vlm_out = gr.Textbox(show_label=False, interactive=False, scale=3)
                 clear_vis = gr.Button(L["btn_clear"], size="sm")
 
@@ -1905,6 +2016,7 @@ def build_ui():
                         value="auto", label=L["label_stt_lang"], scale=3,
                     )
                     load_stt_btn = gr.Button(L["btn_load"], size="sm", scale=2)
+                    unload_stt_btn = gr.Button(L["btn_unload"], size="sm", scale=2)
                     load_stt_out = gr.Textbox(show_label=False, interactive=False, scale=3)
                 stt_hint = gr.Markdown(L["stt_khmer_hint"])
                 transcribe_btn = gr.Button(L["btn_transcribe"], variant="primary")
@@ -1931,7 +2043,9 @@ def build_ui():
                 with gr.Accordion(L["accordion_add"], open=True) as acc_add:
                     file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md",".docx"], file_count="multiple")
                     vis_ret_dd = gr.Dropdown(choices=list(VISUAL_RETRIEVER_OPTIONS.keys()), value=list(VISUAL_RETRIEVER_OPTIONS.keys())[0], label=L["label_vis_ret"])
-                    up_btn     = gr.Button(L["btn_index"], variant="primary")
+                    with gr.Row():
+                        up_btn             = gr.Button(L["btn_index"], variant="primary", scale=3)
+                        unload_visual_btn  = gr.Button(L["btn_unload"], size="sm", scale=2)
                     up_msg     = gr.Textbox(label=L["label_res"], interactive=False, lines=4)
 
                 kb_header = gr.Markdown(L["header_docs"])
@@ -1998,6 +2112,7 @@ def build_ui():
         send_gen.click(chat_general,  [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen])
         clear_gen.click(lambda: ([], ""), outputs=[bot_gen, msg_gen])
         reload_gen.click(reload_gen_fn, [model_dd_gen], [reload_gen_out])
+        unload_gen_btn.click(unload_llm_fn, [lang_state], [reload_gen_out])
 
         # RAG Chat
         def reload_rag_fn(label):
@@ -2016,6 +2131,7 @@ def build_ui():
         send_rag.click(chat_rag,  [msg_rag, bot_rag, model_dd_rag], [bot_rag, msg_rag])
         clear_rag.click(lambda: ([], ""), outputs=[bot_rag, msg_rag])
         reload_rag.click(reload_rag_fn, [model_dd_rag], [reload_rag_out])
+        unload_rag_btn.click(unload_llm_fn, [lang_state], [reload_rag_out])
 
         # Vision Chat
         def load_vlm_fn(label):
@@ -2032,6 +2148,7 @@ def build_ui():
         msg_vis.submit(chat_vision,  [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload])
         clear_vis.click(lambda: ([], None), outputs=[bot_vis, img_upload])
         load_vlm_btn.click(load_vlm_fn, [vlm_dd], [load_vlm_out])
+        unload_vlm_btn.click(unload_vlm_fn, [lang_state], [load_vlm_out])
 
         # Speech to Text
         def load_stt_fn(label):
@@ -2050,6 +2167,7 @@ def build_ui():
 
         transcribe_btn.click(do_transcribe, [stt_audio, stt_dd, stt_lang_dd], [stt_output])
         load_stt_btn.click(load_stt_fn, [stt_dd], [load_stt_out])
+        unload_stt_btn.click(unload_stt_fn, [lang_state], [load_stt_out])
 
         # Data Analysis
         def reset_data_agent_fn():
@@ -2098,6 +2216,7 @@ def build_ui():
 
         doc_table.select(on_select,        [selected_rows_state], [selected_rows_state])
         up_btn.click(do_upload,            [file_up, vis_ret_dd], [up_msg, doc_table])
+        unload_visual_btn.click(unload_visual_retriever_fn, [lang_state], [up_msg])
         refresh_btn.click(get_doc_table,   outputs=[doc_table])
         delete_sel_btn.click(do_delete,    [selected_rows_state, doc_table], [doc_table, action_msg, selected_rows_state])
         clear_all_btn.click(do_clear,      outputs=[doc_table, action_msg, selected_rows_state])
@@ -2121,6 +2240,7 @@ def build_ui():
                 gr.update(value=l["btn_send"]),
                 gr.update(label=l["label_llm"]),
                 gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_unload"]),
                 gr.update(value=l["btn_clear"]),
                 # RAG Chat
                 gr.update(value=l["tab_rag_desc"]),
@@ -2128,14 +2248,16 @@ def build_ui():
                 gr.update(value=l["btn_send"]),
                 gr.update(label=l["label_llm"]),
                 gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_unload"]),
                 gr.update(value=l["btn_clear"]),
                 # Vision Chat
                 gr.update(value=l["tab_vision_desc"]),
                 gr.update(placeholder=l["placeholder_vis"]),
                 gr.update(value=l["btn_send"]),
                 gr.update(label=l["label_vlm"]),
-                gr.update(label=l["label_vis_rag"]),
+                gr.update(label=l["label_vis_rag"], info=l["label_vis_rag_info"]),
                 gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_unload"]),
                 gr.update(value=l["btn_clear"]),
                 # STT
                 gr.update(value=l["tab_stt_desc"]),
@@ -2143,6 +2265,7 @@ def build_ui():
                 gr.update(label=l["label_stt"]),
                 gr.update(label=l["label_stt_lang"]),
                 gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_unload"]),
                 gr.update(value=l["stt_khmer_hint"]),
                 gr.update(value=l["btn_transcribe"]),
                 gr.update(label=l["label_res"]),
@@ -2160,6 +2283,7 @@ def build_ui():
                 gr.update(label=l["file_label"]),
                 gr.update(label=l["label_vis_ret"]),
                 gr.update(value=l["btn_index"]),
+                gr.update(value=l["btn_unload"]),
                 gr.update(label=l["label_res"]),
                 gr.update(value=l["header_docs"]),
                 gr.update(value=l["btn_refresh"]),
@@ -2173,18 +2297,18 @@ def build_ui():
             lang_state, header_title, header_sub,
             gguf_dir_tb, scan_gguf_btn,
             # General Chat
-            gen_desc, msg_gen, send_gen, model_dd_gen, reload_gen, clear_gen,
+            gen_desc, msg_gen, send_gen, model_dd_gen, reload_gen, unload_gen_btn, clear_gen,
             # RAG Chat
-            rag_desc, msg_rag, send_rag, model_dd_rag, reload_rag, clear_rag,
+            rag_desc, msg_rag, send_rag, model_dd_rag, reload_rag, unload_rag_btn, clear_rag,
             # Vision Chat
-            vis_desc, msg_vis, send_vis, vlm_dd, vis_rag_chk, load_vlm_btn, clear_vis,
+            vis_desc, msg_vis, send_vis, vlm_dd, vis_rag_chk, load_vlm_btn, unload_vlm_btn, clear_vis,
             # STT
-            stt_desc, stt_audio, stt_dd, stt_lang_dd, load_stt_btn, stt_hint, transcribe_btn, stt_output,
+            stt_desc, stt_audio, stt_dd, stt_lang_dd, load_stt_btn, unload_stt_btn, stt_hint, transcribe_btn, stt_output,
             # Data Analysis
             data_desc, data_file_up, msg_data, send_data, model_dd_data, reset_data_btn,
             data_gallery, data_report_file, clear_data,
             # Knowledge Base
-            file_up, vis_ret_dd, up_btn, up_msg,
+            file_up, vis_ret_dd, up_btn, unload_visual_btn, up_msg,
             kb_header, refresh_btn, delete_sel_btn, clear_all_btn,
             # Status bar
             status_bar,

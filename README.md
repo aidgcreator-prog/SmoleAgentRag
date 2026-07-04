@@ -1,4 +1,4 @@
-# 🔍 RAG Agent — smolagents · ChromaDB · Multi-Modal · GPU/CPU
+# 🤖 Multipurpose AI Assistant — by LocalAiLab
 
 🇰🇭 **[ខ្មែរ](#-ខ្មែរ)** | 🇬🇧 **[English](#-english)**
 
@@ -6,7 +6,7 @@
 
 ## 🇰🇭 ខ្មែរ
 
-ភ្នាក់ងារ RAG (Retrieval-Augmented Generation) ដែលដំណើរការនៅលើម៉ាស៊ីនរបស់អ្នកផ្ទាល់ បានបង្កើតឡើងដោយប្រើ [smolagents](https://github.com/huggingface/smolagents) មានចំណុចប្រទាក់ Gradio ការផ្ទុកទិន្នន័យជាប់លាប់ដោយប្រើ ChromaDB សមត្ថភាពពហុម៉ូដាល (រូបភាព/VLM) និងការបំលែងសំឡេងទៅជាអក្សរ។ ប្រព័ន្ធនេះនឹងរកឃើញ និងប្រើប្រាស់ GPU របស់អ្នកដោយស្វ័យប្រវត្តិ (CUDA, AMD, ឬ Mac MPS) ប្រសិនបើមាន បើពុំនោះទេនឹងប្រើ CPU ជំនួសវិញ។ ក្រៅពីម៉ូដែល HuggingFace/transformers ជាលំនាំដើម កម្មវិធីនេះក៏អាចប្រើម៉ូដែលមូលដ្ឋាន **GGUF តាមរយៈ llama.cpp** ផងដែរ។
+ជំនួយការ AI ពហុមុខងារ ដោយ **LocalAiLab** ដែលដំណើរការនៅលើម៉ាស៊ីនរបស់អ្នកផ្ទាល់ បានបង្កើតឡើងដោយប្រើ [smolagents](https://github.com/huggingface/smolagents) មានចំណុចប្រទាក់ Gradio ការសន្ទនាទូទៅ វិភាគឯកសារតាមរយៈ RAG (Retrieval-Augmented Generation) ជាមួយការផ្ទុកទិន្នន័យជាប់លាប់ដោយប្រើ ChromaDB សមត្ថភាពពហុម៉ូដាល (រូបភាព/VLM) ការបំលែងសំឡេងទៅជាអក្សរ និងការវិភាគទិន្នន័យ CSV/Excel ដោយ AI Agent។ ប្រព័ន្ធនេះនឹងរកឃើញ និងប្រើប្រាស់ GPU របស់អ្នកដោយស្វ័យប្រវត្តិ (CUDA, AMD, ឬ Mac MPS) ប្រសិនបើមាន បើពុំនោះទេនឹងប្រើ CPU ជំនួសវិញ។ ក្រៅពីម៉ូដែល HuggingFace/transformers ជាលំនាំដើម កម្មវិធីនេះក៏អាចប្រើម៉ូដែលមូលដ្ឋាន **GGUF តាមរយៈ llama.cpp** ផងដែរ។
 
 ចំណុចប្រទាក់អាចប្តូរភាសាបាន — អ្នកអាចប្តូររវាង **ភាសាខ្មែរ** និង **អង់គ្លេស** នៅពេលណាក៏បាន ដោយប្រើបញ្ជីទម្លាក់ភាសានៅជ្រុងខាងលើខាងស្តាំ។ ផ្ទាំង **ℹ️ អំពីកម្មវិធី** បង្ហាញព័ត៌មានទាំងពីរភាសាជានិច្ច (ខ្មែរខាងលើ អង់គ្លេសខាងក្រោម) ដោយមិនអាស្រ័យលើបញ្ជីទម្លាក់ភាសានោះទេ។
 
@@ -196,7 +196,7 @@ python app.py
 
 ## 🇬🇧 English
 
-A versatile local RAG (Retrieval-Augmented Generation) agent built with [smolagents](https://github.com/huggingface/smolagents), featuring a Gradio UI, persistent ChromaDB storage, multi-modal capabilities (Vision/VLM), and Speech-to-Text transcription. It automatically detects and uses your GPU (CUDA, AMD, or Mac MPS) if available, falling back to CPU otherwise. Besides the default HuggingFace/transformers models, the app can also run local **GGUF models via llama.cpp**.
+A local, multipurpose AI assistant built by **LocalAiLab** with [smolagents](https://github.com/huggingface/smolagents), featuring a Gradio UI, general chat, document RAG (Retrieval-Augmented Generation) with persistent ChromaDB storage, multi-modal capabilities (Vision/VLM), Speech-to-Text transcription, and AI-driven CSV/Excel data analysis. It automatically detects and uses your GPU (CUDA, AMD, or Mac MPS) if available, falling back to CPU otherwise. Besides the default HuggingFace/transformers models, the app can also run local **GGUF models via llama.cpp**.
 
 The UI is fully bilingual — switch between **Khmer** and **English** at any time using the language dropdown in the top-right corner. The **ℹ️ About** tab always shows both languages (Khmer above, English below) regardless of that dropdown.
 

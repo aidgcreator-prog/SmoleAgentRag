@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-index_docs.py — CLI tool to index documents into ChromaDB without launching the UI.
+index_docs.py — CLI indexing tool for the Multipurpose AI Assistant (by LocalAiLab).
+Indexes documents into the app's ChromaDB knowledge base without launching the UI.
 
 Usage examples:
   # Index a PDF
