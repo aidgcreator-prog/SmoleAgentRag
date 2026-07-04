@@ -40,8 +40,9 @@ def main():
     args = parser.parse_args()
 
     # Import after argparse so --help is instant
-    from app import (
-        get_embed_model, get_chroma_collection, get_index_stats,
+    from models import get_embed_model, get_chroma_collection
+    from knowledge_base import (
+        get_index_stats,
         index_pdf_file, index_txt_file, index_docx_file, index_hf_dataset, clear_index,
     )
 

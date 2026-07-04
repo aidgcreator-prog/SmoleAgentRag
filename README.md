@@ -181,7 +181,18 @@ python app.py
 
 ```
 .
-├── app.py           # កម្មវិធីសំខាន់៖ agent, tools, ឧបករណ៍បញ្ចូលឯកសារ (PDF/TXT/MD/DOCX), STT, ចំណុចប្រទាក់ Gradio
+├── app.py           # ចំណុចចូលកម្មវិធី (launch) — ឡូជិកពិតត្រូវបានបំបែកទៅជាម៉ូឌុលខាងក្រោម
+├── i18n.py          # ខ្សែអក្សរចំណុចប្រទាក់ (ខ្មែរ/អង់គ្លេស)
+├── hardware.py      # ការរកឃើញ GPU/Device និងការជួសជុលបរិយាកាសដោយខ្លួនឯង
+├── user_config.py   # ការកំណត់ដែលរក្សាទុក (ឧ. ថតម៉ូដែល GGUF)
+├── llama_backend.py # backend ជម្រើស llama.cpp (ម៉ូដែល GGUF)
+├── branding.py      # ស្លាកសញ្ញា ឈ្មោះកម្មវិធី/កំណែ និងមាតិកាផ្ទាំង ℹ️ អំពីកម្មវិធី
+├── model_registry.py# បញ្ជីជម្រើសម៉ូដែល (LLM/VLM/STT) និងការស្កេន GGUF ឡើងវិញ
+├── models.py        # ការផ្ទុក/ដោះស្រាយ/ដំណើរការ LLM, VLM, STT
+├── knowledge_base.py# ការបញ្ចូលឯកសារ (PDF/TXT/MD/DOCX), ChromaDB, Visual Index, ការទាញយក
+├── data_analysis.py # CodeAgent សម្រាប់វិភាគ CSV/Excel
+├── chat.py          # Handler សន្ទនាសម្រាប់ផ្ទាំង General/RAG/Vision
+├── ui.py            # ការសង់ចំណុចប្រទាក់ Gradio និងការភ្ជាប់ event ទាំងអស់
 ├── index_docs.py    # ស្គ្រីប CLI សម្រាប់បញ្ចូលឯកសារ
 ├── requirements.txt # Dependencies របស់ Python (រួមទាំង python-docx, llama-cpp-python)
 ├── SETUP.bat        # កម្មវិធីដំឡើងលើ Windows ដោយចុចតែម្តង
@@ -371,7 +382,18 @@ You can change models at runtime via the UI's model selection dropdowns.
 
 ```
 .
-├── app.py           # Main app: agent, tools, indexing helpers (PDF/TXT/MD/DOCX), STT, Gradio UI
+├── app.py           # Entry point (launch) — actual logic lives in the modules below
+├── i18n.py          # Khmer/English UI strings
+├── hardware.py      # GPU/device detection, environment self-fix
+├── user_config.py   # Persisted settings (e.g. GGUF model folder)
+├── llama_backend.py # Optional llama.cpp (GGUF) model backend
+├── branding.py      # Logo, app name/version, ℹ️ About tab content
+├── model_registry.py# Model dropdown options (LLM/VLM/STT) + GGUF rescan
+├── models.py        # LLM/VLM/STT loading, caching, unloading, inference
+├── knowledge_base.py# Document indexing (PDF/TXT/MD/DOCX), ChromaDB, visual index, retrieval
+├── data_analysis.py # CodeAgent for CSV/Excel exploration
+├── chat.py          # Chat-turn handlers for General/RAG/Vision tabs
+├── ui.py            # Gradio Blocks UI + all event wiring
 ├── index_docs.py    # CLI indexing script
 ├── requirements.txt # Python dependencies (incl. python-docx, llama-cpp-python)
 ├── SETUP.bat        # Windows one-click installer
