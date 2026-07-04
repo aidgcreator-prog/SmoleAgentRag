@@ -336,6 +336,17 @@ def get_stt_pipeline(model_id: Optional[str] = None):
             model=target,
             torch_dtype=TORCH_DTYPE,
             device=device_arg,
+            # Whisper's underlying generate() refuses more than 3000 mel
+            # input features (30s of audio) unless either return_timestamps
+            # is set or the pipeline chunks the audio itself first. Setting
+            # chunk_length_s here makes the pipeline split any longer
+            # recording into <=30s windows (with a little overlap via
+            # stride_length_s so words at chunk boundaries aren't cut off),
+            # run each window through generate() normally, and stitch the
+            # text back together — so recordings/uploads of any length just
+            # work, with no extra changes needed in transcribe_audio().
+            chunk_length_s=30,
+            stride_length_s=5,
         )
         _stt_model_id = target
         return _stt_pipeline

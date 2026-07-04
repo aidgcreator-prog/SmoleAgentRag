@@ -14,6 +14,8 @@ from typing import Optional
 from PIL import Image
 from byaldi import RAGMultiModalModel
 
+from smolagents import Tool
+
 import model_registry as mr
 import models
 from hardware import DEVICE
@@ -328,3 +330,59 @@ def retrieve_context(query: str) -> tuple[str, list[str]]:
                           for d, m in zip(docs, metas))
     sources = list({m.get("source", "?") for m in metas})
     return context, sources
+
+
+class RetrieverTool(Tool):
+    """smolagents Tool wrapper around retrieve_context(), for agentic RAG
+    (see rag_agent.py). Unlike the plain RAG Chat path, which always
+    retrieves context before calling the LLM, this lets a CodeAgent decide
+    for itself whether/when to search the knowledge base, and call it more
+    than once (e.g. to refine a search) before giving a final answer.
+    """
+    name = "retriever"
+    description = (
+        "Uses semantic search over the indexed knowledge base (ChromaDB) to "
+        "retrieve the document chunks most relevant to a query. This is the "
+        "ONLY source of information you are permitted to use to answer the "
+        "user — never supplement it with your own general knowledge. Call "
+        "this before answering any question. It returns a clear 'no relevant "
+        "documents found' message if the knowledge base is empty or has "
+        "nothing relevant — treat that as a real answer (there is nothing to "
+        "report), not as a reason to fall back on what you already know."
+    )
+    inputs = {
+        "query": {
+            "type": "string",
+            "description": (
+                "The search query. Prefer an affirmative statement close to "
+                "the target content (e.g. 'steps to push a model to the "
+                "Hub') rather than a literal question."
+            ),
+        }
+    }
+    output_type = "string"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Self-tracked usage stats — used by rag_agent.py to verify (after
+        # agent.run() returns) that the model actually searched the
+        # knowledge base and actually found something, rather than trying
+        # to introspect smolagents' internal step/memory structure, which
+        # varies across versions and previously caused false negatives
+        # (blocking correctly-grounded answers because the introspection
+        # didn't match this installed version's real internals).
+        self.call_count  = 0
+        self.found_count = 0
+
+    def reset_stats(self):
+        self.call_count  = 0
+        self.found_count = 0
+
+    def forward(self, query: str) -> str:
+        assert isinstance(query, str), "Your search query must be a string"
+        self.call_count += 1
+        context, sources = retrieve_context(query)
+        if not context:
+            return "No relevant documents found — the knowledge base may be empty."
+        self.found_count += 1
+        return f"Retrieved documents (sources: {', '.join(sources)}):\n\n{context}"

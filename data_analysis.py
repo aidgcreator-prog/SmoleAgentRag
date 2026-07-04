@@ -4,6 +4,7 @@ files, builds charts, and writes a Markdown report. The agent can install
 any missing Python packages itself via the `install_package` tool.
 """
 
+import inspect
 import shutil
 import subprocess
 import sys
@@ -64,12 +65,24 @@ def get_data_agent(model_id: Optional[str] = None):
 
         print(f"[DataAgent] Building CodeAgent on '{target}' …")
         llm = models.get_llm(target)
-        _data_agent = CodeAgent(
+        agent_kwargs = dict(
             model=llm,
             tools=[install_package],
             additional_authorized_imports=["*"],   # trusted local machine — full stdlib + installed pkgs
             max_steps=mr.DATA_AGENT_MAX_STEPS,
         )
+        # Some models (esp. "thinking"-tuned ones, or anything running
+        # through a raw llama.cpp chat template) reliably write plain
+        # ```python fenced code instead of the <code></code> tags
+        # CodeAgent expects by default, causing every step to fail
+        # parsing. Use the more broadly-compatible markdown-fence
+        # convention when this smolagents version supports it.
+        try:
+            if "code_block_tags" in inspect.signature(CodeAgent.__init__).parameters:
+                agent_kwargs["code_block_tags"] = "markdown"
+        except (TypeError, ValueError):
+            pass
+        _data_agent = CodeAgent(**agent_kwargs)
         _data_agent_model_id = target
         return _data_agent
 

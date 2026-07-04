@@ -12,6 +12,7 @@ from PIL import Image
 import knowledge_base as kb
 import model_registry as mr
 import models
+import rag_agent
 from hardware import DEVICE
 
 
@@ -92,7 +93,21 @@ def chat_general(user_message: str, history: list, model_label: str):
     return history, ""
 
 
-def chat_rag(user_message: str, history: list, model_label: str):
+def chat_rag_direct(user_message: str, history: list, model_label: str):
+    """Non-agentic RAG: always retrieve context from ChromaDB first (same
+    retrieval call the agentic path's `retriever` tool wraps), then hand
+    that context straight to the LLM in one direct call — no CodeAgent,
+    no tool-calling, no code-generation steps to parse.
+
+    This exists because tool-calling reliability depends heavily on the
+    underlying model (see rag_agent.py's caveat about Qwen3-0.6B): small
+    or older models often never call the retriever tool, call it
+    malformed, or burn every retry step failing to parse, and end up
+    hallucinating or timing out instead of answering. Retrieval here is
+    unconditional and handled entirely by the app, so even a very small
+    model just has to read the provided context and answer — nothing to
+    invoke, nothing to parse.
+    """
     if not user_message.strip():
         return history, ""
     history = history or []
@@ -100,22 +115,92 @@ def chat_rag(user_message: str, history: list, model_label: str):
     model_id = mr.MODEL_OPTIONS.get(model_label, mr.DEFAULT_LLM_MODEL)
     try:
         context, sources = kb.retrieve_context(user_message)
-        system = (
-            "You are a helpful assistant. "
-            "Answer the user's question using ONLY the provided context. "
-            "If the context does not contain the answer, say so clearly."
-        )
-        if context:
-            user_prompt = f"Context:\n{context}\n\nQuestion: {user_message}"
+        if not context:
+            ans = rag_agent.NOTHING_FOUND_MESSAGE
+            formatted = format_llm_response(ans)
+            response = (
+                formatted +
+                f"\n\n<hr><sub>model: <code>{model_id}</code> ({DEVICE.upper()}) "
+                f"| direct RAG (no relevant context found)</sub>"
+            )
         else:
-            user_prompt = (f"Question: {user_message}\n\n"
-                           "(The knowledge base is empty — please index some documents first.)")
-        ans, elapsed = models._call_llm(model_id, system, user_prompt)
-        src_str  = f" | sources: {', '.join(sources)}" if sources else " | no docs indexed"
+            system = (
+                "You are a strict retrieval-augmented assistant. Answer the "
+                "user's question using ONLY the context below, which was "
+                "retrieved from the user's own indexed knowledge base. Never "
+                "use your own general knowledge or training data, even if you "
+                "believe you know the answer. If the context doesn't contain "
+                "the answer, say clearly that the knowledge base doesn't "
+                "contain this information — do not guess or fill the gap "
+                "yourself.\n\n"
+                f"Context:\n{context}"
+            )
+            ans, elapsed = models._call_llm(model_id, system, user_message)
+            formatted = format_llm_response(ans)
+            response = (
+                formatted +
+                f"\n\n<hr><sub>⏱ {elapsed:.1f}s | model: <code>{model_id}</code> "
+                f"({DEVICE.upper()}) | direct RAG · sources: {', '.join(sources)}</sub>"
+            )
+    except Exception as e:
+        import traceback
+        response = f"❌ {e}\n\n{traceback.format_exc()}"
+    history.append({"role": "assistant", "content": response})
+    return history, ""
+
+
+def chat_rag(user_message: str, history: list, model_label: str, use_agentic: bool = True):
+    """RAG Chat entry point. Dispatches to one of two retrieval strategies:
+
+    - use_agentic=True (default): a smolagents CodeAgent (see rag_agent.py)
+      decides for itself whether/when to call the `retriever` tool against
+      ChromaDB — and can call it more than once to refine its search —
+      before writing a final answer. Strictly grounded: the agent is
+      instructed (system + per-task level) to answer ONLY from retrieved
+      content, and the answer is also checked after the fact against the
+      RetrieverTool's own self-tracked call/found counts
+      (rag_agent.get_retriever_stats()). If it never searched, or searched
+      and found nothing relevant, the answer is replaced with a clear
+      "not in the knowledge base" message instead of trusting whatever the
+      model wrote. Best with capable models (roughly Qwen3-4B and above) —
+      small models often fumble the tool-calling/code-parsing steps.
+
+    - use_agentic=False: see chat_rag_direct() — always retrieves context
+      first, then asks the LLM directly in one call. No tool-calling
+      required, so small/older/weaker models (e.g. Qwen3-0.6B) can use RAG
+      reliably too, at the cost of never refining or skipping the search.
+    """
+    if not use_agentic:
+        return chat_rag_direct(user_message, history, model_label)
+
+    if not user_message.strip():
+        return history, ""
+    history = history or []
+    history.append({"role": "user", "content": user_message})
+    model_id = mr.MODEL_OPTIONS.get(model_label, mr.DEFAULT_LLM_MODEL)
+    try:
+        agent = rag_agent.get_rag_agent(model_id)
+        rag_agent.reset_retriever_stats()
+        task = rag_agent.build_strict_task(user_message)
+
+        t0     = time.time()
+        result = agent.run(task)
+        elapsed = time.time() - t0
+
+        call_count, found_count = rag_agent.get_retriever_stats()
+        if call_count == 0:
+            ans = rag_agent.NEVER_SEARCHED_MESSAGE
+        elif found_count == 0:
+            ans = rag_agent.NOTHING_FOUND_MESSAGE
+        else:
+            ans = str(result)
+
         formatted = format_llm_response(ans)
         response = (
             formatted +
-            f"\n\n<hr><sub>⏱ {elapsed:.1f}s | model: <code>{model_id}</code> ({DEVICE.upper()}){src_str}</sub>"
+            f"\n\n<hr><sub>⏱ {elapsed:.1f}s | model: <code>{model_id}</code> "
+            f"({DEVICE.upper()}) | agentic RAG · strict grounding "
+            f"(searched {call_count}x)</sub>"
         )
     except Exception as e:
         import traceback

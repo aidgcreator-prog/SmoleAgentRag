@@ -8,6 +8,7 @@ the model dropdowns — everything else keeps working.
 
 import contextlib
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -255,6 +256,36 @@ class LlamaCppModel:
                 # rather than the bare wrapper exception.
                 _raise_gguf_load_error(model_path, n_ctx, n_gpu_layers, e)
 
+    # Some GGUF checkpoints — particularly MoE "thinking"/harmony-style
+    # fine-tunes — embed a chat template that llama.cpp/llama-cpp-python
+    # doesn't always render identically to how the model was actually
+    # trained. When that happens, fragments of the model's internal
+    # channel-routing tokens (e.g. "<|channel|>analysis", "<channel|>",
+    # "<|message|>") leak into the plain-text output instead of being
+    # consumed as structural tokens — which then confuses anything
+    # downstream trying to parse the text (e.g. smolagents' code-block
+    # regex, or format_llm_response()'s <think> tag matching).
+    _LEAKED_CONTROL_TOKEN_RE = re.compile(
+        r"<\|?/?(?:channel|message|start|end|return|call)\|?>",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _sanitize_content(cls, text: str) -> str:
+        """Best-effort cleanup of leaked chat-template control tokens.
+
+        This does NOT fix the underlying template mismatch — it only
+        strips known leaked fragments so downstream parsers see clean
+        text. If a model consistently leaks these, its GGUF conversion
+        likely ships a chat template that doesn't match how the model
+        was fine-tuned, and switching to a different quantization/
+        conversion of the same model (or using it via the HuggingFace/
+        transformers backend instead) is the more reliable fix.
+        """
+        if not text:
+            return text
+        return cls._LEAKED_CONTROL_TOKEN_RE.sub("", text).strip()
+
     @staticmethod
     def _flatten_content(content) -> str:
         if isinstance(content, list):
@@ -284,6 +315,7 @@ class LlamaCppModel:
             top_p=kwargs.get("top_p", self.top_p),
         )
         text = out["choices"][0]["message"]["content"]
+        text = self._sanitize_content(text)
         return ChatMessage(role="assistant", content=text)
 
     # smolagents Model instances are called directly in some code paths
