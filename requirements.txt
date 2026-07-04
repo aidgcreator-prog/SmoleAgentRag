@@ -1,5 +1,8 @@
 # ── Core agent stack ──────────────────────────────────────────────
-smolagents[transformers]>=1.8.0
+# "toolkit" extra pulls in duckduckgo-search + markdownify, needed by
+# general_agent.py's DuckDuckGoSearchTool / VisitWebpageTool (agentic
+# General Chat's web-search + webpage-reading tools).
+smolagents[transformers,toolkit]>=1.8.0
 
 # ── Vector store ──────────────────────────────────────────────────
 chromadb>=0.5.0
@@ -10,14 +13,7 @@ FlagEmbedding>=1.2.0            # optimal backend for BAAI/bge-m3
 
 # ── LLM / inference ───────────────────────────────────────────────
 torch>=2.2.0                    # install the CUDA wheel separately via SETUP.bat
-# NOTE: deepreinforce-ai/Ornith-1.0-9B (see model_registry.ORNITH_IDS) is a
-# Qwen3.5 hybrid linear-/full-attention ("qwen35") architecture that older
-# transformers releases simply don't know how to build. Its model card
-# requires transformers>=5.8.1, so that's the floor here even though every
-# other HF model in this app's dropdown works fine on much older releases.
-# models.py checks the installed version at load time and raises a clear
-# error (instead of a cryptic AutoModel failure) if this ever drifts.
-transformers>=5.8.1
+transformers>=4.51.0
 accelerate>=0.30.0
 bitsandbytes>=0.43.0            # optional 4/8-bit quantisation
 

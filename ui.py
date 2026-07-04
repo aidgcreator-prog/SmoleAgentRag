@@ -25,6 +25,7 @@ import gradio as gr
 import branding
 import chat
 import data_analysis
+import general_agent
 import knowledge_base as kb
 import llama_backend
 import model_registry as mr
@@ -105,6 +106,10 @@ def build_ui():
                     with gr.Column(scale=3, min_width=260, elem_classes=["tab-sidebar"]):
                         gen_settings_header = gr.Markdown(f"### {L['accordion_settings']}", elem_classes=["sidebar-hd"])
                         gen_desc = gr.Markdown(L["tab_general_desc"])
+                        gen_agentic_chk = gr.Checkbox(
+                            label=L["label_gen_agentic"], value=False,
+                            info=L["info_gen_agentic"],
+                        )
                         model_dd_gen = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"])
                         with gr.Row():
                             reload_gen     = gr.Button(L["btn_load"], size="sm")
@@ -266,10 +271,12 @@ def build_ui():
 
         # General Chat
         def reload_gen_fn(label):
-            # The data-analysis agent holds its own reference to the shared
-            # LLM instance — reset it too so it doesn't keep the old model
-            # (or its now-stale weights) alive; it rebuilds cheaply against
-            # the newly loaded one on next use.
+            # Both the general agentic CodeAgent and the data-analysis
+            # agent hold their own reference to the shared LLM instance —
+            # reset both caches so neither keeps the old model (or its
+            # now-stale weights) alive; they rebuild cheaply against the
+            # newly loaded one on next use.
+            general_agent.reset_agent()
             data_analysis.reset_agent()
             mid = mr.MODEL_OPTIONS.get(label, mr.DEFAULT_LLM_MODEL)
             try:
@@ -280,18 +287,19 @@ def build_ui():
 
         def unload_gen_fn(lang_key):
             msg = models.unload_llm_fn(lang_key)
+            general_agent.reset_agent()
             data_analysis.reset_agent()
             return gr.update(value=msg, visible=True)
 
-        def do_chat_general(user_message, history, model_label):
+        def do_chat_general(user_message, history, model_label, use_agentic):
             # Wraps chat.chat_general() to also pop the conversation
             # accordion open the moment there's something to show — it
             # starts collapsed on every page load.
-            history, cleared = chat.chat_general(user_message, history, model_label)
+            history, cleared = chat.chat_general(user_message, history, model_label, use_agentic)
             return history, cleared, gr.update(open=True)
 
-        msg_gen.submit(do_chat_general, [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen, acc_gen_chat])
-        send_gen.click(do_chat_general,  [msg_gen, bot_gen, model_dd_gen], [bot_gen, msg_gen, acc_gen_chat])
+        msg_gen.submit(do_chat_general, [msg_gen, bot_gen, model_dd_gen, gen_agentic_chk], [bot_gen, msg_gen, acc_gen_chat])
+        send_gen.click(do_chat_general,  [msg_gen, bot_gen, model_dd_gen, gen_agentic_chk], [bot_gen, msg_gen, acc_gen_chat])
         clear_gen.click(lambda: ([], "", gr.update(open=False)), outputs=[bot_gen, msg_gen, acc_gen_chat])
         reload_gen.click(reload_gen_fn, [model_dd_gen], [reload_gen_out])
         unload_gen_btn.click(unload_gen_fn, [lang_state], [reload_gen_out])
@@ -452,6 +460,7 @@ def build_ui():
                 gr.update(label=l["accordion_chat"]),
                 gr.update(value=f"### {l['accordion_settings']}"),
                 gr.update(value=l["tab_general_desc"]),
+                gr.update(label=l["label_gen_agentic"], info=l["info_gen_agentic"]),
                 gr.update(label=l["label_llm"]),
                 gr.update(value=l["btn_load"]),
                 gr.update(value=l["btn_unload"]),
@@ -521,7 +530,7 @@ def build_ui():
             lang_state, header_title, header_sub,
             gguf_dir_tb, scan_gguf_btn,
             # General Chat
-            msg_gen, send_gen, clear_gen, acc_gen_chat, gen_settings_header, gen_desc, model_dd_gen, reload_gen, unload_gen_btn,
+            msg_gen, send_gen, clear_gen, acc_gen_chat, gen_settings_header, gen_desc, gen_agentic_chk, model_dd_gen, reload_gen, unload_gen_btn,
             # RAG Chat
             msg_rag, send_rag, clear_rag, acc_rag_chat, rag_settings_header, rag_desc, rag_agentic_chk, model_dd_rag, reload_rag, unload_rag_btn,
             # Vision Chat

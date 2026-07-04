@@ -26,7 +26,7 @@ MAX_NEW_TOKENS      = 512
 DATA_ANALYSIS_DIR   = "./data_analysis"
 DATA_UPLOAD_DIR      = f"{DATA_ANALYSIS_DIR}/uploads"
 DATA_OUTPUT_DIR      = f"{DATA_ANALYSIS_DIR}/outputs"
-DATA_AGENT_MAX_STEPS = 12
+DATA_AGENT_MAX_STEPS = 20
 
 QWEN3_IDS    = {"Qwen/Qwen3-0.6B", "Qwen/Qwen3-1.7B", "Qwen/Qwen3-4B",
                 "Qwen/Qwen3-8B", "Qwen/Qwen3-14B", "Qwen/Qwen3-32B"}

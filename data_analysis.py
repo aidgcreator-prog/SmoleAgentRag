@@ -51,6 +51,32 @@ def install_package(package_name: str) -> str:
         return f"❌ Error installing '{package_name}': {e}"
 
 
+@tool
+def save_report(content: str, filename: str = "report.md") -> str:
+    """
+    Save Markdown report text to a file inside the data-analysis output
+    directory.
+
+    IMPORTANT: the sandboxed code executor blocks Python's built-in
+    open()/write() for safety — calling open() directly always fails
+    with "Forbidden function evaluation". Use THIS tool to save your
+    report instead. (matplotlib's plt.savefig() is a separate whitelisted
+    call and works fine for charts — no change needed there.)
+
+    Args:
+        content: The full Markdown report text to save.
+        filename: File name to save it as, e.g. "report.md" (default).
+    """
+    try:
+        out_dir = Path(mr.DATA_OUTPUT_DIR)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / filename
+        path.write_text(content, encoding="utf-8")
+        return f"✅ Saved report to '{path}' ({len(content)} chars)."
+    except Exception as e:
+        return f"❌ Failed to save report: {e}"
+
+
 def get_data_agent(model_id: Optional[str] = None):
     """Lazily build (or rebuild, if the model changed) the data-analysis CodeAgent."""
     global _data_agent, _data_agent_model_id
@@ -67,7 +93,7 @@ def get_data_agent(model_id: Optional[str] = None):
         llm = models.get_llm(target)
         agent_kwargs = dict(
             model=llm,
-            tools=[install_package],
+            tools=[install_package, save_report],
             additional_authorized_imports=["*"],   # trusted local machine — full stdlib + installed pkgs
             max_steps=mr.DATA_AGENT_MAX_STEPS,
         )
@@ -133,37 +159,101 @@ def run_data_analysis(files, question: str, model_label: str, history: list):
         return history, None, None
 
     question = (question or "").strip() or (
-        "Explore this dataset, summarize key statistics and trends, "
-        "and generate a short report with at least one chart."
+        "Perform a full exploratory data analysis (EDA) on this dataset and "
+        "generate a thorough Markdown report with multiple charts."
     )
     model_id = mr.MODEL_OPTIONS.get(model_label, mr.DEFAULT_LLM_MODEL)
     history.append({"role": "user", "content": f"📎 {', '.join(Path(p).name for p in paths)}\n\n{question}"})
 
     try:
-        Path(mr.DATA_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+        out_dir = Path(mr.DATA_OUTPUT_DIR)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Now that a run can produce many charts (full EDA, not just one),
+        # clear out PNGs left over from a previous analysis first — otherwise
+        # they'd pile up and get mixed into this run's gallery below.
+        for stale_png in out_dir.glob("*.png"):
+            try:
+                stale_png.unlink()
+            except OSError:
+                pass
         agent = get_data_agent(model_id)
         file_list_str = "\n".join(f"- {p}" for p in paths)
         report_path = str(Path(mr.DATA_OUTPUT_DIR) / "report.md")
 
-        task = f"""You are a data analysis assistant working with pandas in a local Python sandbox.
+        task = f"""You are a data analysis assistant performing a thorough Exploratory
+Data Analysis (EDA) with pandas and matplotlib, in a local Python sandbox.
 
 Data file(s) provided by the user:
 {file_list_str}
 
 User request: {question}
 
-Instructions:
-1. Load the file(s) with pandas (pd.read_csv for .csv, pd.read_excel for .xlsx/.xls —
-   if a required package like 'openpyxl' is missing, call the install_package tool with
-   its pip name first, then retry the import).
-2. Explore the data: shape, columns, dtypes, missing values, basic descriptive statistics.
-3. Perform the analysis the user asked for. If a package you need isn't available,
-   install it with the install_package tool instead of giving up.
-4. Create at least one relevant chart with matplotlib and save each chart as a PNG file
-   inside the directory '{mr.DATA_OUTPUT_DIR}' (use plt.savefig(...); do not call plt.show()).
-5. Write a concise Markdown report of your findings (headings, bullet points, key numbers)
-   and save it to '{report_path}'.
-6. As your FINAL ANSWER, return the full Markdown report text.
+Do a REAL exploratory analysis, not just a one-paragraph summary. Work through
+every relevant section below (skip a section only if it genuinely doesn't apply —
+e.g. no categorical columns exist, or only one numeric column exists so no
+correlation is possible). Aim for several charts, not just one.
+
+1. LOAD & OVERVIEW
+   - Load the file(s) with pandas (pd.read_csv for .csv, pd.read_excel for
+     .xlsx/.xls — if a required package like 'openpyxl' is missing, call the
+     install_package tool with its pip name first, then retry the import).
+   - Report shape, column names, dtypes, memory usage, missing-value counts
+     (and %), and duplicate-row count.
+   - Split columns into numeric vs categorical (use pd.api.types.is_numeric_dtype
+     / is_datetime64_any_dtype — do NOT use nonexistent methods like
+     select_d_dtype; the real pandas method is data.select_dtypes(include=...)).
+
+2. UNIVARIATE ANALYSIS (per numeric column, or the most important few if there
+   are many)
+   - Descriptive statistics: mean, median, std, min, max, quartiles, skewness.
+   - For EACH numeric column (or top 5 most relevant if there are more), plot a
+     histogram AND a boxplot (either as two separate PNGs, or combined into one
+     figure with subplots) to show distribution shape and outliers.
+   - For each categorical column (or top 5 most relevant), plot a bar chart of
+     value counts (group rare categories into "Other" if there are more than
+     ~10 distinct values).
+   - Note any skew, outliers, or unusual patterns you observe in the text report.
+
+3. BIVARIATE / RELATIONSHIP ANALYSIS
+   - If there are 2+ numeric columns: compute the correlation matrix
+     (data.corr(numeric_only=True)) and plot it as a heatmap using
+     matplotlib's plt.imshow(...) with a colorbar and axis tick labels (no
+     seaborn required, but you may install_package("seaborn") and use it if
+     you prefer — either is fine).
+   - Pick the 1-3 most correlated (or most business-relevant, based on the
+     user's request) numeric column pairs and make scatter plots of each pair.
+   - If there's an obvious categorical grouping column, make at least one
+     grouped comparison chart (e.g. bar chart of a numeric column's mean per
+     category, or overlaid/side-by-side boxplots per category).
+
+4. OUTLIERS
+   - Flag outliers using the IQR method (values beyond Q1 - 1.5*IQR or
+     Q3 + 1.5*IQR) for at least the 1-2 most important numeric columns, and
+     report how many outlier rows were found per column.
+
+5. SAVE EVERY CHART
+   - Save every chart as its own PNG with a descriptive filename inside the
+     directory '{mr.DATA_OUTPUT_DIR}' (use plt.savefig(...); ALWAYS call
+     plt.close() right after savefig so figures don't bleed into each other;
+     never call plt.show()).
+
+6. WRITE THE REPORT
+   - Write a well-structured Markdown report with headings for each section
+     above (Overview, Univariate Analysis, Correlation/Relationships,
+     Outliers, Key Insights), including the actual numbers you computed (not
+     placeholders) and 3-5 concrete bullet-point insights/observations at the
+     end — not just restating the stats, but what they mean (e.g. "X is
+     right-skewed with several high outliers", "A and B are strongly
+     correlated (r=0.82), suggesting...").
+   - Reference the chart filenames you created in the relevant sections so a
+     reader knows which chart supports which point.
+   - Call the save_report tool with that Markdown text to save it, e.g.:
+     save_report(content=report_text). Do NOT use Python's open()/write() to
+     save the report — the sandbox blocks raw open() and that call always
+     fails. (plt.savefig() is a separate whitelisted call and works fine for
+     charts — only raw open() is blocked.)
+
+7. As your FINAL ANSWER, return the full Markdown report text.
 """
         t0 = time.time()
         result = agent.run(task)

@@ -12,6 +12,7 @@ from PIL import Image
 import knowledge_base as kb
 import model_registry as mr
 import models
+import general_agent
 import rag_agent
 from hardware import DEVICE
 
@@ -70,7 +71,7 @@ line-height:1.6;
 """
 
 
-def chat_general(user_message: str, history: list, model_label: str):
+def chat_general_direct(user_message: str, history: list, model_label: str):
     if not user_message.strip():
         return history, ""
     history = history or []
@@ -91,6 +92,54 @@ def chat_general(user_message: str, history: list, model_label: str):
         response = f"❌ {e}\n\n{traceback.format_exc()}"
     history.append({"role": "assistant", "content": response})
     return history, ""
+
+
+def chat_general_agentic(user_message: str, history: list, model_label: str):
+    """Agentic General Chat: a smolagents CodeAgent (see general_agent.py)
+    with the library's own built-in web-search/webpage tools
+    (DuckDuckGoSearchTool, VisitWebpageTool), deciding for itself whether
+    a question needs a web lookup before answering. Unlike RAG Chat's
+    agent, this has no knowledge-base grounding requirement — it's meant
+    for open-ended questions, not strictly-cited document Q&A.
+    """
+    if not user_message.strip():
+        return history, ""
+    history = history or []
+    history.append({"role": "user", "content": user_message})
+    model_id = mr.MODEL_OPTIONS.get(model_label, mr.DEFAULT_LLM_MODEL)
+    try:
+        agent = general_agent.get_general_agent(model_id)
+        t0     = time.time()
+        result = agent.run(user_message)
+        elapsed = time.time() - t0
+
+        formatted = format_llm_response(str(result))
+        response = (
+            formatted +
+            f"\n\n<hr><sub>⏱ {elapsed:.1f}s | model: <code>{model_id}</code> "
+            f"({DEVICE.upper()}) | agentic · web search + code</sub>"
+        )
+    except Exception as e:
+        import traceback
+        response = f"❌ {e}\n\n{traceback.format_exc()}"
+    history.append({"role": "assistant", "content": response})
+    return history, ""
+
+
+def chat_general(user_message: str, history: list, model_label: str, use_agentic: bool = False):
+    """General Chat entry point. Dispatches to:
+
+    - use_agentic=False (default, unchanged behaviour): one direct LLM
+      call, no tools — see chat_general_direct().
+    - use_agentic=True: a CodeAgent with web-search/webpage tools decides
+      for itself whether to look things up — see chat_general_agentic().
+      Same reliability caveat as agentic RAG Chat: works best with
+      capable models (roughly Qwen3-4B and above); small models may never
+      call a tool at all.
+    """
+    if use_agentic:
+        return chat_general_agentic(user_message, history, model_label)
+    return chat_general_direct(user_message, history, model_label)
 
 
 def chat_rag_direct(user_message: str, history: list, model_label: str):
