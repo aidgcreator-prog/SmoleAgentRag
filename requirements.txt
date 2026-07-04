@@ -2,7 +2,13 @@
 # "toolkit" extra pulls in duckduckgo-search + markdownify, needed by
 # general_agent.py's DuckDuckGoSearchTool / VisitWebpageTool (agentic
 # General Chat's web-search + webpage-reading tools).
-smolagents[transformers,toolkit]>=1.8.0
+# "audio" extra covers smolagents' SpeechToTextTool (also used by
+# general_agent.py) — it decodes audio inputs via smolagents' own
+# AgentAudio type and loads a Whisper checkpoint through transformers,
+# which "transformers" below already covers; "audio" additionally pulls
+# in any audio-decoding dependency smolagents' AgentAudio needs beyond
+# soundfile (already required below for the app's own Speech-to-Text tab).
+smolagents[transformers,toolkit,audio]>=1.8.0
 
 # ── Vector store ──────────────────────────────────────────────────
 chromadb>=0.5.0

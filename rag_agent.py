@@ -24,6 +24,7 @@ from typing import Optional
 
 from smolagents import CodeAgent
 
+import agent_memory
 import model_registry as mr
 import models
 from knowledge_base import RetrieverTool
@@ -32,6 +33,10 @@ _rag_agent          = None
 _rag_agent_model_id = None
 _rag_tool           = None
 _rag_agent_lock     = threading.Lock()
+
+# See general_agent.MEMORY_TAB_KEY — namespaces this agent's persisted
+# memory file separately from the other tabs'.
+MEMORY_TAB_KEY = "rag"
 
 # ──────────────────────────────────────────────────────────────────
 # Strict grounding — layer 1: agent-level system instructions (applied
@@ -44,7 +49,16 @@ STRICT_SYSTEM_INSTRUCTIONS = (
     "knowledge or training data, even if you believe you know the answer. "
     "Always call `retriever` before answering. If the retrieved documents "
     "don't contain the answer, say clearly that the knowledge base doesn't "
-    "contain this information — do not guess or fill the gap yourself."
+    "contain this information — do not guess or fill the gap yourself.\n\n"
+    "CITATION REQUIREMENT: every chunk the retriever returns is tagged with "
+    "its source in brackets, e.g. '[report.pdf]'. Cite that exact bracketed "
+    "tag in-text immediately after every claim you make from it (e.g. "
+    "'Revenue grew 12% [report.pdf].'). Finish your final answer with a "
+    "'### References' section listing every distinct source you cited, "
+    "e.g.:\n"
+    "### References\n"
+    "- report.pdf\n"
+    "- notes.docx"
 )
 
 # ──────────────────────────────────────────────────────────────────
@@ -68,7 +82,11 @@ def build_strict_task(question: str) -> str:
         "not guess.\n\n"
         "1. Call `retriever` with a focused search query based on the question.\n"
         "2. If the retrieved documents answer the question, write your final "
-        "answer using only that retrieved information.\n"
+        "answer using only that retrieved information. Cite the bracketed "
+        "source tag shown on each chunk (e.g. '[report.pdf]') in-text "
+        "immediately after every claim drawn from it, and end your answer "
+        "with a '### References' section listing every distinct source you "
+        "cited.\n"
         "3. If they don't, try ONE more `retriever` call with a rephrased query.\n"
         "4. If you still can't find the answer in the retrieved documents, your "
         f"final answer must clearly state that {STRICT_NOT_FOUND_PHRASE} — do "
@@ -108,10 +126,16 @@ def reset_retriever_stats():
 
 
 def get_retriever_stats() -> tuple:
-    """Call right after agent.run() returns. Returns (call_count, found_count)."""
+    """Call right after agent.run() returns. Returns (call_count,
+    found_count, sources_used) — sources_used is the ACTUAL set of source
+    filenames the retriever returned this run, tracked directly by the
+    tool itself (see knowledge_base.RetrieverTool) rather than trusting
+    the model's own in-text citations — lets chat.py print a
+    guaranteed-accurate References list regardless of whether the model
+    remembered to write its own."""
     if _rag_tool is None:
-        return 0, 0
-    return _rag_tool.call_count, _rag_tool.found_count
+        return 0, 0, set()
+    return _rag_tool.call_count, _rag_tool.found_count, set(_rag_tool.sources_used)
 
 
 def _build_code_agent(llm, tool: RetrieverTool) -> CodeAgent:
@@ -159,6 +183,11 @@ def get_rag_agent(model_id: Optional[str] = None):
         _rag_tool  = RetrieverTool()
         _rag_agent = _build_code_agent(llm, _rag_tool)
         _rag_agent_model_id = target
+        # Restore this model's persisted memory (if any) — see
+        # agent_memory.py's module docstring for why this is keyed per
+        # (tab, model_id) rather than replayed across model switches.
+        if agent_memory.load_agent_memory_into(_rag_agent, MEMORY_TAB_KEY, target):
+            print(f"[RAGAgent] Restored persisted memory for '{target}'.")
         return _rag_agent
 
 

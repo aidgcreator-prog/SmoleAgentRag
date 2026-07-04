@@ -15,6 +15,7 @@ from typing import Optional
 
 from smolagents import CodeAgent, tool
 
+import agent_memory
 import model_registry as mr
 import models
 from hardware import DEVICE
@@ -23,6 +24,24 @@ from knowledge_base import get_file_path
 _data_agent          = None
 _data_agent_model_id = None
 _data_agent_lock      = threading.Lock()
+
+# How many conversation turns the Data Analysis CodeAgent is allowed to
+# remember (see agent_memory.cap_agent_memory()). Kept smaller than the
+# other tabs' default of 6 because each turn's task prompt here is already
+# long (the full EDA instructions in run_data_analysis() below), so memory
+# grows the prompt much faster per turn than a one-line chat question would.
+DATA_AGENT_MEMORY_TURNS = 3
+
+# Tracks which uploaded file paths the agent's current memory "belongs
+# to". A new/changed set of files means a different dataset, so old
+# memory (which may reference the previous file's columns/stats) needs to
+# be dropped even though the model itself hasn't changed — see
+# agent_memory.reset_if_context_changed().
+_last_data_context = {"key": None}
+
+# See general_agent.MEMORY_TAB_KEY — namespaces this agent's persisted
+# memory file separately from the other tabs'.
+MEMORY_TAB_KEY = "data_analysis"
 
 
 @tool
@@ -110,6 +129,15 @@ def get_data_agent(model_id: Optional[str] = None):
             pass
         _data_agent = CodeAgent(**agent_kwargs)
         _data_agent_model_id = target
+        # Restore this model's persisted memory (if any). Note this can
+        # restore memory that references a PREVIOUS dataset's
+        # columns/stats if the app was restarted with the same file still
+        # uploaded — run_data_analysis()'s reset_if_context_changed() call
+        # (keyed on the uploaded file paths, independent of this) still
+        # runs on every call and will drop it again if the dataset key
+        # doesn't match, so this is safe either way.
+        if agent_memory.load_agent_memory_into(_data_agent, MEMORY_TAB_KEY, target):
+            print(f"[DataAgent] Restored persisted memory for '{target}'.")
         return _data_agent
 
 
@@ -148,8 +176,15 @@ def save_data_files(files) -> list:
     return paths
 
 
-def run_data_analysis(files, question: str, model_label: str, history: list):
-    """Hand uploaded data + the user's question to the CodeAgent and collect its report."""
+def run_data_analysis(files, question: str, model_label: str, history: list, use_memory: bool = True):
+    """Hand uploaded data + the user's question to the CodeAgent and collect its report.
+
+    `use_memory` controls the "🧠 Conversation Memory" checkbox: when on,
+    the CodeAgent remembers earlier turns about the SAME dataset (capped —
+    see DATA_AGENT_MEMORY_TURNS) and old memory is dropped automatically
+    if a different file is uploaded. When off, every question is answered
+    from a clean slate regardless of what file is uploaded.
+    """
     history = history or []
 
     paths = save_data_files(files)
@@ -177,6 +212,14 @@ def run_data_analysis(files, question: str, model_label: str, history: list):
             except OSError:
                 pass
         agent = get_data_agent(model_id)
+        # New/changed dataset → old agent memory (referencing whatever the
+        # previous file's columns/stats were) is no longer relevant, so
+        # drop it even though the model itself hasn't changed. Only
+        # relevant when memory is on — when it's off, reset=True below
+        # already makes every run stateless regardless of dataset.
+        if use_memory:
+            agent_memory.reset_if_context_changed(reset_agent, _last_data_context, tuple(sorted(paths)))
+        agent = get_data_agent(model_id)  # re-fetch in case reset_agent() just cleared the cache
         file_list_str = "\n".join(f"- {p}" for p in paths)
         report_path = str(Path(mr.DATA_OUTPUT_DIR) / "report.md")
 
@@ -256,13 +299,26 @@ correlation is possible). Aim for several charts, not just one.
 7. As your FINAL ANSWER, return the full Markdown report text.
 """
         t0 = time.time()
-        result = agent.run(task)
+        # reset=False keeps this CodeAgent's memory across turns on the
+        # SAME dataset (e.g. "now also break that down by region" after an
+        # initial EDA) — see
+        # https://huggingface.co/docs/smolagents/tutorials/memory. Capped
+        # right after via agent_memory.cap_agent_memory(), and fully reset
+        # above whenever the uploaded file(s) change. reset=True (memory
+        # checkbox off) makes every question stateless instead.
+        result = agent.run(task, reset=not use_memory)
+        if use_memory:
+            agent_memory.cap_agent_memory(agent, max_turns=DATA_AGENT_MEMORY_TURNS)
+            # Persist to disk too, not just RAM — so memory survives an
+            # app restart, not only a same-session model switch.
+            agent_memory.save_agent_memory(agent, MEMORY_TAB_KEY, model_id)
         elapsed = time.time() - t0
 
         report_text = str(result)
         response = (
             report_text +
-            f"\n\n<hr><sub>⏱ {elapsed:.1f}s | model: <code>{model_id}</code> ({DEVICE.upper()})</sub>"
+            f"\n\n<hr><sub>⏱ {elapsed:.1f}s | model: <code>{model_id}</code> "
+            f"({DEVICE.upper()}) | memory: {'on' if use_memory else 'off'}</sub>"
         )
         history.append({"role": "assistant", "content": response})
 

@@ -22,6 +22,7 @@ the first language switch.
 
 import gradio as gr
 
+import agent_memory
 import branding
 import chat
 import data_analysis
@@ -95,7 +96,17 @@ def build_ui():
                 label=L["label_gguf_dir"], scale=8,
             )
             scan_gguf_btn = gr.Button(L["btn_scan_gguf"], scale=1)
+            ctx_window_dd = gr.Dropdown(
+                choices=list(mr.CONTEXT_WINDOW_OPTIONS.keys()),
+                value=mr.get_saved_context_window_label(),
+                label=L["label_context_window"],
+                info=L["info_context_window"],
+                scale=3,
+            )
         gguf_scan_status = gr.Textbox(show_label=False, interactive=False, visible=False)
+        ctx_window_status = gr.Textbox(show_label=False, interactive=False, visible=False)
+        with gr.Accordion(L["accordion_details"], open=False) as acc_ctx_detail:
+            ctx_window_detail_md = gr.Markdown(L["info_context_window_detail"])
 
         # ── Tabs ──────────────────────────────────────────────────
         with gr.Tabs():
@@ -110,6 +121,13 @@ def build_ui():
                             label=L["label_gen_agentic"], value=False,
                             info=L["info_gen_agentic"],
                         )
+                        gen_memory_chk = gr.Checkbox(
+                            label=L["label_memory"], value=True,
+                            info=L["info_memory"],
+                        )
+                        with gr.Accordion(L["accordion_details"], open=False) as acc_gen_detail:
+                            gen_agentic_detail_md = gr.Markdown(L["info_gen_agentic_detail"])
+                            gen_memory_detail_md  = gr.Markdown(L["info_memory_detail"])
                         model_dd_gen = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"])
                         with gr.Row():
                             reload_gen     = gr.Button(L["btn_load"], size="sm")
@@ -134,6 +152,13 @@ def build_ui():
                             label=L["label_vis_rag"], value=False,
                             info=L["label_vis_rag_info"],
                         )
+                        vis_memory_chk = gr.Checkbox(
+                            label=L["label_memory"], value=True,
+                            info=L["info_memory"],
+                        )
+                        with gr.Accordion(L["accordion_details"], open=False) as acc_vis_detail:
+                            vis_rag_detail_md    = gr.Markdown(L["label_vis_rag_info_detail"])
+                            vis_memory_detail_md = gr.Markdown(L["info_memory_detail"])
                         with gr.Row():
                             load_vlm_btn   = gr.Button(L["btn_load"], size="sm")
                             unload_vlm_btn = gr.Button(L["btn_unload"], size="sm")
@@ -164,6 +189,8 @@ def build_ui():
                             unload_stt_btn = gr.Button(L["btn_unload"], size="sm")
                         load_stt_out = gr.Textbox(show_label=False, interactive=False, visible=False)
                         stt_hint = gr.Markdown(L["stt_khmer_hint"])
+                        with gr.Accordion(L["accordion_details"], open=False) as acc_stt_detail:
+                            stt_hint_detail_md = gr.Markdown(L["stt_khmer_hint_detail"])
                     with gr.Column(scale=7):
                         stt_audio      = gr.Audio(label=L["stt_audio_label"], sources=["microphone", "upload"], type="filepath")
                         transcribe_btn = gr.Button(L["btn_transcribe"], variant="primary")
@@ -177,6 +204,12 @@ def build_ui():
                         data_settings_header = gr.Markdown(f"### {L['accordion_settings']}", elem_classes=["sidebar-hd"])
                         data_desc = gr.Markdown(L["tab_data_desc"])
                         model_dd_data  = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"])
+                        data_memory_chk = gr.Checkbox(
+                            label=L["label_memory"], value=True,
+                            info=L["info_memory"],
+                        )
+                        with gr.Accordion(L["accordion_details"], open=False) as acc_data_detail:
+                            data_memory_detail_md = gr.Markdown(L["info_memory_detail"])
                         reset_data_btn = gr.Button(L["btn_reset_agent"], size="sm")
                         reset_data_out = gr.Textbox(show_label=False, interactive=False, visible=False)
                     with gr.Column(scale=7):
@@ -226,6 +259,13 @@ def build_ui():
                             label=L["label_rag_agentic"], value=True,
                             info=L["info_rag_agentic"],
                         )
+                        rag_memory_chk = gr.Checkbox(
+                            label=L["label_memory"], value=True,
+                            info=L["info_memory"],
+                        )
+                        with gr.Accordion(L["accordion_details"], open=False) as acc_rag_detail:
+                            rag_agentic_detail_md = gr.Markdown(L["info_rag_agentic_detail"])
+                            rag_memory_detail_md  = gr.Markdown(L["info_memory_detail"])
                         model_dd_rag = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"])
                         with gr.Row():
                             reload_rag     = gr.Button(L["btn_load"], size="sm")
@@ -255,19 +295,47 @@ def build_ui():
         # GGUF model folder — rescan updates every model dropdown at once,
         # and reveals the scan-result textbox (hidden until a scan runs).
         def do_rescan_gguf(folder_path, lang_key):
-            msg, dd1, dd2, dd3 = mr.rescan_gguf_models(folder_path, lang_key)
-            return gr.update(value=msg, visible=True), dd1, dd2, dd3
+            msg, dd1, dd2, dd3, vlm_dd_update = mr.rescan_gguf_models(folder_path, lang_key)
+            return gr.update(value=msg, visible=True), dd1, dd2, dd3, vlm_dd_update
 
         scan_gguf_btn.click(
             do_rescan_gguf,
             [gguf_dir_tb, lang_state],
-            [gguf_scan_status, model_dd_gen, model_dd_rag, model_dd_data],
+            [gguf_scan_status, model_dd_gen, model_dd_rag, model_dd_data, vlm_dd],
         )
         gguf_dir_tb.submit(
             do_rescan_gguf,
             [gguf_dir_tb, lang_state],
-            [gguf_scan_status, model_dd_gen, model_dd_rag, model_dd_data],
+            [gguf_scan_status, model_dd_gen, model_dd_rag, model_dd_data, vlm_dd],
         )
+
+        # Context Window (n_ctx) — GGUF/llama.cpp only. Persists the choice
+        # immediately (models.get_llm()'s fallback logic picks it up on any
+        # future load), and if a GGUF model happens to be loaded right now,
+        # force-reloads it with the new n_ctx so the change is felt right
+        # away instead of silently waiting for the next unrelated reload.
+        def do_change_context_window(label):
+            n_ctx = mr.CONTEXT_WINDOW_OPTIONS.get(label, mr.DEFAULT_CONTEXT_WINDOW)
+            mr.set_context_window(n_ctx)
+            # Every agentic CodeAgent wrapper holds its own reference to
+            # the shared LLM object — drop all three caches so none of
+            # them keep pointing at the model instance we're about to
+            # release below (same pattern as reload_gen_fn/reload_rag_fn).
+            general_agent.reset_agent()
+            rag_agent.reset_agent()
+            data_analysis.reset_agent()
+            currently_loaded = models._llm_model_id
+            if models._llm is not None and str(currently_loaded).lower().endswith(".gguf"):
+                try:
+                    models.force_reload_llm(currently_loaded, n_ctx=n_ctx)
+                    msg = f"✅ Context window set to {n_ctx} tokens — '{currently_loaded}' reloaded."
+                except Exception as e:
+                    msg = f"❌ Failed to reload with the new context window: {e}"
+            else:
+                msg = f"✅ Context window set to {n_ctx} tokens — will apply next time a GGUF model loads."
+            return gr.update(value=msg, visible=True)
+
+        ctx_window_dd.change(do_change_context_window, [ctx_window_dd], [ctx_window_status])
 
         # General Chat
         def reload_gen_fn(label):
@@ -291,16 +359,31 @@ def build_ui():
             data_analysis.reset_agent()
             return gr.update(value=msg, visible=True)
 
-        def do_chat_general(user_message, history, model_label, use_agentic):
+        def do_chat_general(user_message, history, model_label, use_agentic, use_memory):
             # Wraps chat.chat_general() to also pop the conversation
             # accordion open the moment there's something to show — it
             # starts collapsed on every page load.
-            history, cleared = chat.chat_general(user_message, history, model_label, use_agentic)
+            history, cleared = chat.chat_general(user_message, history, model_label, use_agentic, use_memory)
             return history, cleared, gr.update(open=True)
 
-        msg_gen.submit(do_chat_general, [msg_gen, bot_gen, model_dd_gen, gen_agentic_chk], [bot_gen, msg_gen, acc_gen_chat])
-        send_gen.click(do_chat_general,  [msg_gen, bot_gen, model_dd_gen, gen_agentic_chk], [bot_gen, msg_gen, acc_gen_chat])
-        clear_gen.click(lambda: ([], "", gr.update(open=False)), outputs=[bot_gen, msg_gen, acc_gen_chat])
+        msg_gen.submit(do_chat_general, [msg_gen, bot_gen, model_dd_gen, gen_agentic_chk, gen_memory_chk], [bot_gen, msg_gen, acc_gen_chat])
+        send_gen.click(do_chat_general,  [msg_gen, bot_gen, model_dd_gen, gen_agentic_chk, gen_memory_chk], [bot_gen, msg_gen, acc_gen_chat])
+
+        def clear_gen_fn():
+            # Clearing the visible chat should also clear the agentic
+            # CodeAgent's own memory (agent.memory.steps) — otherwise a
+            # "fresh" conversation would still secretly remember the old
+            # one via agent.run(..., reset=False). The direct (non-agentic)
+            # path's memory comes from the chat history itself, which this
+            # already wipes. Also delete the persisted-to-disk copy (see
+            # agent_memory.py) so a cleared conversation stays cleared
+            # across an app restart too, not just for the rest of this
+            # session.
+            general_agent.reset_agent()
+            agent_memory.clear_saved_memory(general_agent.MEMORY_TAB_KEY)
+            return [], "", gr.update(open=False)
+
+        clear_gen.click(clear_gen_fn, outputs=[bot_gen, msg_gen, acc_gen_chat])
         reload_gen.click(reload_gen_fn, [model_dd_gen], [reload_gen_out])
         unload_gen_btn.click(unload_gen_fn, [lang_state], [reload_gen_out])
 
@@ -325,13 +408,22 @@ def build_ui():
             data_analysis.reset_agent()
             return gr.update(value=msg, visible=True)
 
-        def do_chat_rag(user_message, history, model_label, use_agentic):
-            history, cleared = chat.chat_rag(user_message, history, model_label, use_agentic)
+        def do_chat_rag(user_message, history, model_label, use_agentic, use_memory):
+            history, cleared = chat.chat_rag(user_message, history, model_label, use_agentic, use_memory)
             return history, cleared, gr.update(open=True)
 
-        msg_rag.submit(do_chat_rag, [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk], [bot_rag, msg_rag, acc_rag_chat])
-        send_rag.click(do_chat_rag,  [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk], [bot_rag, msg_rag, acc_rag_chat])
-        clear_rag.click(lambda: ([], "", gr.update(open=False)), outputs=[bot_rag, msg_rag, acc_rag_chat])
+        msg_rag.submit(do_chat_rag, [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk, rag_memory_chk], [bot_rag, msg_rag, acc_rag_chat])
+        send_rag.click(do_chat_rag,  [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk, rag_memory_chk], [bot_rag, msg_rag, acc_rag_chat])
+
+        def clear_rag_fn():
+            # See clear_gen_fn() above — also drops the agentic CodeAgent's
+            # own memory (RAM + persisted-to-disk copy) so a cleared
+            # conversation is actually fresh, including across a restart.
+            rag_agent.reset_agent()
+            agent_memory.clear_saved_memory(rag_agent.MEMORY_TAB_KEY)
+            return [], "", gr.update(open=False)
+
+        clear_rag.click(clear_rag_fn, outputs=[bot_rag, msg_rag, acc_rag_chat])
         reload_rag.click(reload_rag_fn, [model_dd_rag], [reload_rag_out])
         unload_rag_btn.click(unload_rag_fn, [lang_state], [reload_rag_out])
 
@@ -347,12 +439,12 @@ def build_ui():
         def unload_vlm_fn(lang_key):
             return gr.update(value=models.unload_vlm_fn(lang_key), visible=True)
 
-        def do_chat_vision(user_message, uploaded_image, history, vlm_label, use_visual_rag):
-            history, img_reset = chat.chat_vision(user_message, uploaded_image, history, vlm_label, use_visual_rag)
+        def do_chat_vision(user_message, uploaded_image, history, vlm_label, use_visual_rag, use_memory):
+            history, img_reset = chat.chat_vision(user_message, uploaded_image, history, vlm_label, use_visual_rag, use_memory)
             return history, img_reset, gr.update(open=True)
 
-        send_vis.click(do_chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload, acc_vis_chat])
-        msg_vis.submit(do_chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk], [bot_vis, img_upload, acc_vis_chat])
+        send_vis.click(do_chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk, vis_memory_chk], [bot_vis, img_upload, acc_vis_chat])
+        msg_vis.submit(do_chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk, vis_memory_chk], [bot_vis, img_upload, acc_vis_chat])
         clear_vis.click(lambda: ([], None, gr.update(open=False)), outputs=[bot_vis, img_upload, acc_vis_chat])
         load_vlm_btn.click(load_vlm_fn, [vlm_dd], [load_vlm_out])
         unload_vlm_btn.click(unload_vlm_fn, [lang_state], [load_vlm_out])
@@ -385,18 +477,29 @@ def build_ui():
             data_analysis.reset_agent()
             return gr.update(value="✅ Agent reset — will rebuild on next run.", visible=True)
 
-        def do_data_analysis(files, question, model_label, history):
-            history, gallery, report_file = data_analysis.run_data_analysis(files, question, model_label, history)
+        def do_data_analysis(files, question, model_label, history, use_memory):
+            history, gallery, report_file = data_analysis.run_data_analysis(files, question, model_label, history, use_memory)
             # Reveal (expand) both the conversation and the results
             # accordions now that there's something in them — both stay
             # collapsed until an analysis actually runs.
             return history, "", gallery, report_file, gr.update(open=True), gr.update(open=True)
 
-        send_data.click(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data],
+        send_data.click(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data, data_memory_chk],
                         [bot_data, msg_data, data_gallery, data_report_file, acc_data_chat, acc_data_results])
-        msg_data.submit(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data],
+        msg_data.submit(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data, data_memory_chk],
                         [bot_data, msg_data, data_gallery, data_report_file, acc_data_chat, acc_data_results])
-        clear_data.click(lambda: ([], None, None, gr.update(open=False), gr.update(open=False)),
+        def clear_data_fn():
+            # See clear_gen_fn() above — also drops the Data Analysis
+            # agent's own memory (RAM + persisted-to-disk copy) so a
+            # cleared conversation starts fresh, including across a
+            # restart (also resets the "last dataset" tracker so the next
+            # upload doesn't skip a reset it should otherwise trigger).
+            data_analysis.reset_agent()
+            agent_memory.clear_saved_memory(data_analysis.MEMORY_TAB_KEY)
+            data_analysis._last_data_context["key"] = None
+            return [], None, None, gr.update(open=False), gr.update(open=False)
+
+        clear_data.click(clear_data_fn,
                          outputs=[bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results])
         reset_data_btn.click(reset_data_agent_fn, outputs=[reset_data_out])
 
@@ -453,6 +556,7 @@ def build_ui():
                 # GGUF model folder
                 gr.update(label=l["label_gguf_dir"], placeholder=l["gguf_dir_placeholder"]),
                 gr.update(value=l["btn_scan_gguf"]),
+                gr.update(label=l["label_context_window"], info=l["info_context_window"]),
                 # General Chat
                 gr.update(placeholder=l["placeholder_gen"]),
                 gr.update(value=l["btn_send"]),
@@ -461,6 +565,7 @@ def build_ui():
                 gr.update(value=f"### {l['accordion_settings']}"),
                 gr.update(value=l["tab_general_desc"]),
                 gr.update(label=l["label_gen_agentic"], info=l["info_gen_agentic"]),
+                gr.update(label=l["label_memory"], info=l["info_memory"]),
                 gr.update(label=l["label_llm"]),
                 gr.update(value=l["btn_load"]),
                 gr.update(value=l["btn_unload"]),
@@ -472,6 +577,7 @@ def build_ui():
                 gr.update(value=f"### {l['accordion_settings']}"),
                 gr.update(value=l["tab_rag_desc"]),
                 gr.update(label=l["label_rag_agentic"], info=l["info_rag_agentic"]),
+                gr.update(label=l["label_memory"], info=l["info_memory"]),
                 gr.update(label=l["label_llm"]),
                 gr.update(value=l["btn_load"]),
                 gr.update(value=l["btn_unload"]),
@@ -484,6 +590,7 @@ def build_ui():
                 gr.update(value=l["tab_vision_desc"]),
                 gr.update(label=l["label_vlm"]),
                 gr.update(label=l["label_vis_rag"], info=l["label_vis_rag_info"]),
+                gr.update(label=l["label_memory"], info=l["info_memory"]),
                 gr.update(value=l["btn_load"]),
                 gr.update(value=l["btn_unload"]),
                 # STT
@@ -510,6 +617,7 @@ def build_ui():
                 gr.update(value=f"### {l['accordion_settings']}"),
                 gr.update(value=l["tab_data_desc"]),
                 gr.update(label=l["label_llm"]),
+                gr.update(label=l["label_memory"], info=l["info_memory"]),
                 gr.update(value=l["btn_reset_agent"]),
                 # Knowledge Base
                 gr.update(label=l["accordion_add"]),
@@ -524,28 +632,42 @@ def build_ui():
                 gr.update(value=l["btn_clear_all"]),
                 # Status bar
                 kb.get_index_stats(lk),
+                # "Details" accordions (collapsed long explanations) + their content
+                gr.update(label=l["accordion_details"]), gr.update(value=l["info_context_window_detail"]),
+                gr.update(label=l["accordion_details"]), gr.update(value=l["info_gen_agentic_detail"]), gr.update(value=l["info_memory_detail"]),
+                gr.update(label=l["accordion_details"]), gr.update(value=l["info_rag_agentic_detail"]), gr.update(value=l["info_memory_detail"]),
+                gr.update(label=l["accordion_details"]), gr.update(value=l["label_vis_rag_info_detail"]), gr.update(value=l["info_memory_detail"]),
+                gr.update(label=l["accordion_details"]), gr.update(value=l["stt_khmer_hint_detail"]),
+                gr.update(label=l["accordion_details"]), gr.update(value=l["info_memory_detail"]),
             )
 
         _lang_outputs = [
             lang_state, header_title, header_sub,
-            gguf_dir_tb, scan_gguf_btn,
+            gguf_dir_tb, scan_gguf_btn, ctx_window_dd,
             # General Chat
-            msg_gen, send_gen, clear_gen, acc_gen_chat, gen_settings_header, gen_desc, gen_agentic_chk, model_dd_gen, reload_gen, unload_gen_btn,
+            msg_gen, send_gen, clear_gen, acc_gen_chat, gen_settings_header, gen_desc, gen_agentic_chk, gen_memory_chk, model_dd_gen, reload_gen, unload_gen_btn,
             # RAG Chat
-            msg_rag, send_rag, clear_rag, acc_rag_chat, rag_settings_header, rag_desc, rag_agentic_chk, model_dd_rag, reload_rag, unload_rag_btn,
+            msg_rag, send_rag, clear_rag, acc_rag_chat, rag_settings_header, rag_desc, rag_agentic_chk, rag_memory_chk, model_dd_rag, reload_rag, unload_rag_btn,
             # Vision Chat
-            msg_vis, send_vis, clear_vis, acc_vis_chat, vis_settings_header, vis_desc, vlm_dd, vis_rag_chk, load_vlm_btn, unload_vlm_btn,
+            msg_vis, send_vis, clear_vis, acc_vis_chat, vis_settings_header, vis_desc, vlm_dd, vis_rag_chk, vis_memory_chk, load_vlm_btn, unload_vlm_btn,
             # STT
             stt_audio, transcribe_btn, acc_stt_result, stt_output, stt_settings_header, stt_desc,
             stt_dd, stt_lang_dd, load_stt_btn, unload_stt_btn, stt_hint,
             # Data Analysis
             data_file_up, msg_data, send_data, clear_data, acc_data_chat, acc_data_results, data_gallery, data_report_file,
-            data_settings_header, data_desc, model_dd_data, reset_data_btn,
+            data_settings_header, data_desc, model_dd_data, data_memory_chk, reset_data_btn,
             # Knowledge Base
             acc_add, file_up, vis_ret_dd, up_btn, unload_visual_btn, up_msg,
             acc_kb_docs, refresh_btn, delete_sel_btn, clear_all_btn,
             # Status bar
             status_bar,
+            # "Details" accordions (collapsed long explanations)
+            acc_ctx_detail, ctx_window_detail_md,
+            acc_gen_detail, gen_agentic_detail_md, gen_memory_detail_md,
+            acc_rag_detail, rag_agentic_detail_md, rag_memory_detail_md,
+            acc_vis_detail, vis_rag_detail_md, vis_memory_detail_md,
+            acc_stt_detail, stt_hint_detail_md,
+            acc_data_detail, data_memory_detail_md,
         ]
 
         lang_dropdown.change(switch_lang, [lang_dropdown], _lang_outputs)

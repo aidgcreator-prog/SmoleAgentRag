@@ -21,6 +21,12 @@ _embed_model         = None
 _chroma_col          = None
 _llm                 = None
 _llm_model_id        = mr.DEFAULT_LLM_MODEL
+# Context window (n_ctx) the currently-loaded LLM was built with — only
+# meaningful for the GGUF/llama.cpp backend (see model_registry.py's
+# CONTEXT_WINDOW_OPTIONS). None until a GGUF model has actually been
+# loaded at least once; HF/transformers models leave this as None too,
+# since n_ctx doesn't apply to them.
+_llm_n_ctx           = None
 
 # ──────────────────────────────────────────────────────────────────
 # Some newer HuggingFace checkpoints ship architectures that only
@@ -171,89 +177,181 @@ def reset_chroma_collection():
     _chroma_col = None
 
 
-def get_llm(model_id: Optional[str] = None):
-    global _llm, _llm_model_id
-    target = model_id or _llm_model_id
+def get_llm(model_id: Optional[str] = None, n_ctx: Optional[int] = None):
+    """Lazily build (or rebuild, if the model id OR the requested context
+    window changed) the shared LLM instance.
 
-    if _llm is not None and target == _llm_model_id:
+    `n_ctx` (context window, in tokens) only applies to the GGUF/llama.cpp
+    backend — see model_registry.CONTEXT_WINDOW_OPTIONS. If not given
+    explicitly, it falls back to whatever context window the currently
+    loaded model was built with, or — if nothing has been loaded yet — the
+    persisted default from model_registry.get_saved_context_window(). This
+    means callers that don't care about context window (most of them) can
+    keep calling get_llm(model_id) exactly as before, and it'll keep using
+    whatever context window was last chosen (via the UI's global "Context
+    Window" control) without having to thread it through every call site.
+    """
+    global _llm, _llm_model_id, _llm_n_ctx
+    target = model_id or _llm_model_id
+    is_gguf = str(target).lower().endswith(".gguf")
+    target_ctx = n_ctx if n_ctx is not None else (_llm_n_ctx or mr.get_saved_context_window())
+    # A context-window change only matters (and only requires a reload) for
+    # the GGUF backend — n_ctx is baked into llama.cpp's KV-cache at load
+    # time and can't be changed on a live model. HF/transformers models
+    # ignore n_ctx entirely, so changing it should never trigger a
+    # needless reload of an already-loaded HF model.
+    ctx_changed = is_gguf and target_ctx != _llm_n_ctx
+
+    if _llm is not None and target == _llm_model_id and not ctx_changed:
         return _llm
 
     with _llm_lock:
-        if _llm is not None and target == _llm_model_id:
+        if _llm is not None and target == _llm_model_id and not ctx_changed:
             return _llm
 
         if _llm is not None:
-            print(f"[RAG] Unloading previous LLM '{_llm_model_id}' before loading '{target}' …")
+            reason = (f"context window changed to {target_ctx} tokens"
+                      if ctx_changed else f"loading '{target}'")
+            print(f"[RAG] Unloading previous LLM '{_llm_model_id}' before {reason} …")
             _release_model(_llm)
             _llm = None
 
-        if str(target).lower().endswith(".gguf"):
+        if is_gguf:
             if not llama_backend.LLAMA_CPP_AVAILABLE:
                 raise RuntimeError(
                     "llama-cpp-python is not installed. Run SETUP.bat to install "
                     "a hardware-matched build, or install it manually with the "
                     "appropriate CUDA/Metal/ROCm build flags for GPU support."
                 )
-            _llm = llama_backend.LlamaCppModel(
-                model_path=target,
-                n_ctx=16384,
-                # -1 offloads every layer to GPU; on a CPU-only llama-cpp-python
-                # build this is harmless (llama.cpp silently ignores it and runs
-                # on CPU), but we set 0 explicitly once we know for sure so the
-                # load logs are accurate instead of claiming a GPU offload that
-                # won't happen.
-                n_gpu_layers=-1 if llama_backend.LLAMA_CPP_GPU_AVAILABLE else 0,
-                # Flash attention only helps (and is only reliably supported)
-                # when the model is actually running on GPU; LlamaCppModel
-                # itself also falls back gracefully if a specific model's
-                # architecture rejects FA even when the GPU build supports it.
-                flash_attn=llama_backend.LLAMA_CPP_GPU_AVAILABLE,
-                temperature=0.6,
-                top_p=0.95,
-                max_new_tokens=mr.MAX_NEW_TOKENS,
-            )
+            print(f"[RAG] Loading GGUF LLM '{target}' with context window "
+                  f"{target_ctx} tokens on {DEVICE.upper()} …")
+            try:
+                _llm = llama_backend.LlamaCppModel(
+                    model_path=target,
+                    n_ctx=target_ctx,
+                    # -1 offloads every layer to GPU; on a CPU-only llama-cpp-python
+                    # build this is harmless (llama.cpp silently ignores it and runs
+                    # on CPU), but we set 0 explicitly once we know for sure so the
+                    # load logs are accurate instead of claiming a GPU offload that
+                    # won't happen.
+                    n_gpu_layers=-1 if llama_backend.LLAMA_CPP_GPU_AVAILABLE else 0,
+                    # Flash attention only helps (and is only reliably supported)
+                    # when the model is actually running on GPU; LlamaCppModel
+                    # itself also falls back gracefully if a specific model's
+                    # architecture rejects FA even when the GPU build supports it.
+                    flash_attn=llama_backend.LLAMA_CPP_GPU_AVAILABLE,
+                    temperature=0.6,
+                    top_p=0.95,
+                    max_new_tokens=mr.MAX_NEW_TOKENS,
+                )
+            except Exception as e:
+                # A larger n_ctx needs a proportionally larger KV-cache —
+                # on GPU this can OOM even when a smaller context window
+                # for the exact same model loaded fine. Make that
+                # connection explicit instead of leaving the user to
+                # guess from a raw allocation-failure message.
+                if target_ctx > 16384 and ("memory" in str(e).lower() or "alloc" in str(e).lower()):
+                    raise RuntimeError(
+                        f"Failed to load '{target}' with a {target_ctx}-token context "
+                        f"window — this likely ran out of VRAM/RAM, since the KV-cache "
+                        f"size grows with n_ctx. Try a smaller context window from the "
+                        f"'🧠 Context Window' dropdown, or a smaller/more-quantized model.\n\n"
+                        f"Original error: {e}"
+                    ) from e
+                raise
+            _llm_n_ctx = target_ctx
         else:
             _check_transformers_version_for(target)
+            import inspect
             from smolagents import TransformersModel
             print(f"[RAG] Loading LLM '{target}' on {DEVICE.upper()} …")
-            try:
-                _llm = TransformersModel(
-                    model_id=target,
-                    device_map=DEVICE,
-                    dtype=TORCH_DTYPE,
-                    max_new_tokens=mr.MAX_NEW_TOKENS,
-                    temperature=0.6,
-                    top_p=0.95,
-                    trust_remote_code=True,
+
+            base_kwargs = dict(
+                model_id=target,
+                device_map=DEVICE,
+                max_new_tokens=mr.MAX_NEW_TOKENS,
+                temperature=0.6,
+                top_p=0.95,
+                trust_remote_code=True,
+            )
+            # smolagents' TransformersModel constructor only recognizes a
+            # fixed set of named parameters for MODEL LOADING (model_id,
+            # device_map, torch_dtype, trust_remote_code, model_kwargs,
+            # max_new_tokens, ...) — see
+            # https://huggingface.co/docs/smolagents/en/reference/models.
+            # Anything passed that ISN'T one of those named parameters
+            # does NOT raise a TypeError; it's silently absorbed into
+            # TransformersModel's own **kwargs, which it then re-forwards
+            # into EVERY subsequent model.generate() call, not just at
+            # load time. Passing `dtype=` here (a name TransformersModel's
+            # constructor doesn't define) used to slip through this way —
+            # load succeeded with no error, and the model only blew up the
+            # first time an agent actually tried to generate, with
+            # "The following `model_kwargs` are not used by the model:
+            # ['dtype']" — easy to misread as a tool-calling problem
+            # rather than a stale kwarg name. Detect the real parameter
+            # name instead of guessing, so this fails loudly at load time
+            # (a clear, immediate error) if some future smolagents version
+            # renames it again.
+            ctor_params = inspect.signature(TransformersModel.__init__).parameters
+            if "torch_dtype" in ctor_params:
+                base_kwargs["torch_dtype"] = TORCH_DTYPE
+            elif "dtype" in ctor_params:
+                base_kwargs["dtype"] = TORCH_DTYPE
+            else:
+                print(
+                    "[RAG] Warning: installed smolagents' TransformersModel exposes "
+                    "neither 'torch_dtype' nor 'dtype' as a constructor parameter — "
+                    "loading without an explicit dtype (will use the model's default)."
                 )
-            except TypeError:
-                # Older transformers/smolagents combos don't accept the
-                # newer `dtype=` kwarg name yet — fall back to the
-                # long-standing `torch_dtype=` name. (transformers >=5.x
-                # renamed torch_dtype -> dtype in from_pretrained();
-                # smolagents' TransformersModel forwards whichever kwargs
-                # it's given straight through, so pass whichever name the
-                # installed version actually accepts.)
-                _llm = TransformersModel(
-                    model_id=target,
-                    device_map=DEVICE,
-                    torch_dtype=TORCH_DTYPE,
-                    max_new_tokens=mr.MAX_NEW_TOKENS,
-                    temperature=0.6,
-                    top_p=0.95,
-                    trust_remote_code=True,
-                )
+            _llm = TransformersModel(**base_kwargs)
+            # n_ctx doesn't apply to the HF backend — clear it so a later
+            # switch back to a GGUF model doesn't skip a reload it needs
+            # by comparing against a stale value from a previous GGUF load.
+            _llm_n_ctx = None
         _llm_model_id = target
         return _llm
 
 
-def _call_llm(model_id: str, system: str, user: str) -> tuple[str, float]:
-    from smolagents.models import ChatMessage
+def _call_llm(model_id: str, system: str, user: str, history: Optional[list] = None) -> tuple[str, float]:
+    """Direct (non-agentic) single-turn-or-multi-turn LLM call, shared by
+    General Chat's and RAG Chat's *direct* paths (chat.py).
+
+    Built as a plain list of smolagents `ChatMessage`s — the same message
+    object smolagents' own `CodeAgent`/`TransformersModel`/`LlamaCppModel`
+    machinery uses internally — so this goes through the exact same
+    `model(messages)` call contract as the agentic paths, just without a
+    CodeAgent wrapped around it. `role` is passed via smolagents'
+    `MessageRole` enum rather than a bare string, matching how smolagents
+    documents/constructs `ChatMessage` itself.
+
+    `history` (optional): prior turns as `[{"role": "user"|"assistant",
+    "content": str}, ...]`, coming from chat.py's `_recent_memory_messages()`.
+    Folded in between the system prompt and the current `user` message so
+    follow-up questions can refer back to earlier turns — see chat.py's
+    "🧠 Conversation Memory" checkbox.
+    """
+    from smolagents.models import ChatMessage, MessageRole
+
     llm = get_llm(model_id)
+
     messages = [
-        ChatMessage(role="system", content=[{"type": "text", "text": system}]),
-        ChatMessage(role="user",   content=[{"type": "text", "text": user}]),
+        ChatMessage(role=MessageRole.SYSTEM, content=[{"type": "text", "text": system}])
     ]
+    for turn in (history or []):
+        role = turn.get("role")
+        content = turn.get("content", "")
+        if not content:
+            continue
+        if role == "user":
+            msg_role = MessageRole.USER
+        elif role == "assistant":
+            msg_role = MessageRole.ASSISTANT
+        else:
+            continue
+        messages.append(ChatMessage(role=msg_role, content=[{"type": "text", "text": content}]))
+    messages.append(ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": user}]))
+
     t0  = time.time()
     out = llm(messages)
     if hasattr(out, "content"):
@@ -282,6 +380,35 @@ def get_vlm(model_id: Optional[str] = None):
         _vlm_processor = None
 
     print(f"[VLM] Loading '{target}' on {DEVICE.upper()} …")
+
+    # GGUF vision model (llama.cpp) — needs a paired mmproj file, looked
+    # up by path via model_registry.GGUF_VLM_MMPROJ_MAP (populated by
+    # llama_backend.discover_gguf_vlm_models() at startup/rescan). No
+    # separate `_vlm_processor` is needed on this path — image encoding
+    # happens inside LlamaCppVLMModel.answer() itself.
+    if str(target).lower().endswith(".gguf"):
+        if not llama_backend.LLAMA_CPP_AVAILABLE:
+            raise RuntimeError(
+                "llama-cpp-python is not installed — GGUF vision models "
+                "unavailable. Run SETUP.bat, or install it manually."
+            )
+        mmproj_path = mr.GGUF_VLM_MMPROJ_MAP.get(target)
+        if not mmproj_path:
+            raise RuntimeError(
+                f"No mmproj (vision projector) file is registered for "
+                f"'{target}'. Click '🔍 Scan' on the GGUF model folder so "
+                f"it can be re-paired with its mmproj .gguf file — both "
+                f"files must be in the same folder."
+            )
+        _vlm_model = llama_backend.LlamaCppVLMModel(
+            model_path=target,
+            mmproj_path=mmproj_path,
+            n_ctx=mr.get_saved_context_window(),
+            n_gpu_layers=-1 if llama_backend.LLAMA_CPP_GPU_AVAILABLE else 0,
+        )
+        _vlm_processor = None
+        _vlm_model_id = target
+        return _vlm_model, _vlm_processor
 
     from transformers import AutoProcessor
 
@@ -344,6 +471,10 @@ def get_vlm(model_id: Optional[str] = None):
 def vlm_answer(question: str, images: list, context: str = "", model_id: Optional[str] = None) -> str:
     try:
         model, processor = get_vlm(model_id)
+        # GGUF vision model (llama.cpp) — self-contained answer() method,
+        # no transformers processor/chat-template plumbing involved.
+        if isinstance(model, llama_backend.LlamaCppVLMModel):
+            return model.answer(question, images, context=context, max_tokens=mr.MAX_NEW_TOKENS)
         arch = getattr(model, "_arch", "smolvlm")
         system_prompt = "You are a helpful assistant. Answer based on images and context."
         user_text = question + (f"\n\nContext:\n{context}" if context else "")
@@ -551,13 +682,15 @@ def unload_stt_fn(lang_key: str = "kh") -> str:
     return l["msg_unloaded"].format(model=mid)
 
 
-def force_reload_llm(target_model_id: str):
-    """Used by the tab-level 'Load' buttons: fully release whatever LLM is
-    currently loaded (regardless of id) and load `target_model_id` fresh."""
+def force_reload_llm(target_model_id: str, n_ctx: Optional[int] = None):
+    """Used by the tab-level 'Load' buttons and the global '🧠 Context
+    Window' control: fully release whatever LLM is currently loaded
+    (regardless of id) and load `target_model_id` fresh — optionally with
+    a specific context window (GGUF backend only; ignored for HF models)."""
     global _llm
     _release_model(_llm)
     _llm = None
-    return get_llm(target_model_id)
+    return get_llm(target_model_id, n_ctx=n_ctx)
 
 
 def force_reload_vlm(target_model_id: str):

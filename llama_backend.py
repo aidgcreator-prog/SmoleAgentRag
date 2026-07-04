@@ -102,9 +102,73 @@ def discover_gguf_models(folder: Optional[str] = None) -> dict:
     mode_tag = "llama.cpp | GPU" if LLAMA_CPP_GPU_AVAILABLE else "llama.cpp | CPU only — slow"
     found = {}
     for f in sorted(p.glob("*.gguf")):
+        # mmproj (multimodal projector / CLIP vision encoder) files are
+        # only usable paired with a main vision model — see
+        # discover_gguf_vlm_models() below — they're not a standalone
+        # text LLM and would just fail to load if picked here.
+        if "mmproj" in f.stem.lower():
+            continue
         size_gb = f.stat().st_size / (1024 ** 3)
         label = f"🦙 {f.stem}  (~{size_gb:.1f} GB | {mode_tag})"
         found[label] = str(f)
+    return found
+
+
+def discover_gguf_vlm_models(folder: Optional[str] = None) -> dict:
+    """Scan a folder for GGUF vision-language model PAIRS.
+
+    Unlike a text-only GGUF model (one .gguf file is enough),
+    llama.cpp's multimodal support needs TWO files: the main model .gguf
+    plus its matching "mmproj" (multimodal projector / CLIP vision
+    encoder) .gguf. A main .gguf with no mmproj file anywhere in the
+    folder simply can't run as a vision model, so it's skipped here (it
+    can still show up as a normal TEXT model via discover_gguf_models()).
+
+    Returns {label: (model_path, mmproj_path)}.
+
+    Pairing heuristic (best effort — GGUF metadata doesn't record this):
+      - Exactly one mmproj file in the folder -> pair it with EVERY main
+        model file (the common case: a release ships one model file +
+        one mmproj file together).
+      - Multiple mmproj files -> pair each main model with whichever
+        mmproj shares the longest matching filename prefix (vision GGUF
+        releases usually name the mmproj after the model, e.g.
+        'Qwen2-VL-7B-Instruct-Q4_K_M.gguf' +
+        'Qwen2-VL-7B-Instruct-mmproj-f16.gguf').
+    """
+    if not LLAMA_CPP_AVAILABLE:
+        return {}
+    folder = folder if folder is not None else LLAMA_CPP_MODEL_DIR
+    if not folder:
+        return {}
+    p = Path(folder)
+    if not p.exists():
+        return {}
+
+    all_gguf     = sorted(p.glob("*.gguf"))
+    mmproj_files = [f for f in all_gguf if "mmproj" in f.stem.lower()]
+    main_files   = [f for f in all_gguf if "mmproj" not in f.stem.lower()]
+    if not mmproj_files or not main_files:
+        return {}
+
+    def _shared_prefix_len(a: str, b: str) -> int:
+        n = 0
+        for ca, cb in zip(a.lower(), b.lower()):
+            if ca != cb:
+                break
+            n += 1
+        return n
+
+    mode_tag = "llama.cpp | GPU" if LLAMA_CPP_GPU_AVAILABLE else "llama.cpp | CPU only — slow"
+    found = {}
+    for main_f in main_files:
+        best_mmproj = (mmproj_files[0] if len(mmproj_files) == 1
+                       else max(mmproj_files, key=lambda m: _shared_prefix_len(main_f.stem, m.stem)))
+        size_gb = main_f.stat().st_size / (1024 ** 3)
+        mm_gb   = best_mmproj.stat().st_size / (1024 ** 3)
+        label = (f"🦙👁️ {main_f.stem}  (~{size_gb:.1f} GB + mmproj "
+                 f"~{mm_gb:.1f} GB | {mode_tag})")
+        found[label] = (str(main_f), str(best_mmproj))
     return found
 
 
@@ -301,19 +365,79 @@ class LlamaCppModel:
             content = getattr(m, "content", None)
             if content is None:
                 content = m.get("content")
-            plain.append({"role": str(role), "content": self._flatten_content(content)})
+            # `role` is smolagents' MessageRole — a `str`+`Enum` hybrid.
+            # Since Python 3.11, str() on a str-based Enum member no longer
+            # returns the raw value; it returns "MessageRole.USER" instead
+            # of "user" (a well-known 3.11 str-Enum __str__ change). Blindly
+            # calling str(role) therefore corrupted EVERY role sent to
+            # llama.cpp's create_chat_completion (not just this fallback
+            # path) — the chat template got "MessageRole.USER" instead of
+            # "user" on every turn, and the "any role == 'user'" check below
+            # then always failed too, firing the "(continue)" fallback on
+            # every single call instead of only genuine no-user-turn cases.
+            # `.value` gives the correct raw string for an Enum member,
+            # and is a no-op passthrough for a plain str role.
+            role_value = getattr(role, "value", role)
+            plain.append({"role": str(role_value), "content": self._flatten_content(content)})
+
+        # Some GGUF chat templates (notably Gemma's) call Jinja's `strip()`
+        # (or similar) directly on the LAST message's expected-to-be-user
+        # content, or otherwise assume at least one role="user" turn is
+        # present, and raise a jinja2/ValueError ("No user query found in
+        # messages") if that assumption is violated. This can happen when
+        # replayed agent memory (agent.run(task, reset=False)) is fed into
+        # a *different* model/template than the one that produced it (e.g.
+        # right after a model switch), or when a memory-capping edge case
+        # leaves only system/assistant turns. Guarantee at least one user
+        # turn exists so the template never sees an empty case.
+        if not any(p["role"] == "user" for p in plain):
+            # With the role.value fix above, this should now only fire for
+            # genuinely broken/incompatible replayed memory (e.g. a
+            # corrupted persisted-memory file) — not on every call. Log it
+            # loudly so that if it DOES fire, it's immediately visible in
+            # the console instead of silently confusing whatever model is
+            # loaded (which previously just saw a bare, meaningless
+            # "(continue)" and tried to answer it literally).
+            print("[llama.cpp] WARNING: no 'user' role found in the message "
+                  "history sent to this GGUF model — injecting a placeholder "
+                  "user turn so the chat template doesn't reject the request. "
+                  "This usually means replayed agent memory is malformed or "
+                  "incompatible (e.g. a corrupted entry in "
+                  "./agent_memory_store/). Consider clicking 'Clear' on the "
+                  "affected tab to drop its saved memory.")
+            plain.append({"role": "user", "content": "(continue)"})
+
         return plain
 
     def generate(self, messages: list, stop_sequences: Optional[list] = None, **kwargs):
         from smolagents.models import ChatMessage
         plain_messages = self._to_plain_messages(messages)
-        out = self.llm.create_chat_completion(
-            messages=plain_messages,
-            stop=stop_sequences or [],
-            max_tokens=kwargs.get("max_tokens", self.max_new_tokens),
-            temperature=kwargs.get("temperature", self.temperature),
-            top_p=kwargs.get("top_p", self.top_p),
-        )
+        try:
+            out = self.llm.create_chat_completion(
+                messages=plain_messages,
+                stop=stop_sequences or [],
+                max_tokens=kwargs.get("max_tokens", self.max_new_tokens),
+                temperature=kwargs.get("temperature", self.temperature),
+                top_p=kwargs.get("top_p", self.top_p),
+            )
+        except ValueError as e:
+            # Chat-template rendering failures — e.g. a model's Jinja
+            # template rejecting a message list it doesn't like the shape
+            # of (missing user turn, unexpected role ordering, etc.) — are
+            # a template/model-compatibility issue, not a crash-worthy app
+            # bug. Surface it as assistant text (mirrors how the rest of
+            # the app's chat handlers already catch-and-display exceptions)
+            # instead of letting it propagate as an unhandled traceback.
+            return ChatMessage(
+                role="assistant",
+                content=(
+                    f"⚠️ This model's chat template couldn't process the "
+                    f"conversation (possibly after a memory replay across a "
+                    f"model switch): {e}\n\n"
+                    f"Try clearing/resetting the conversation, or rephrasing "
+                    f"your message."
+                ),
+            )
         text = out["choices"][0]["message"]["content"]
         text = self._sanitize_content(text)
         return ChatMessage(role="assistant", content=text)
@@ -321,3 +445,111 @@ class LlamaCppModel:
     # smolagents Model instances are called directly in some code paths
     def __call__(self, messages: list, stop_sequences: Optional[list] = None, **kwargs):
         return self.generate(messages, stop_sequences=stop_sequences, **kwargs)
+
+
+class LlamaCppVLMModel:
+    """Loader/wrapper for GGUF vision-language models via llama.cpp's
+    multimodal support.
+
+    Used directly by models.vlm_answer() — Vision Chat has no smolagents
+    CodeAgent involved, so unlike LlamaCppModel above, this doesn't need
+    to satisfy smolagents' Model contract.
+
+    llama.cpp needs TWO files to run a vision model: the main .gguf plus
+    a "mmproj" (multimodal projector / CLIP vision encoder) .gguf, loaded
+    through one of llama-cpp-python's `chat_handler` classes. Which
+    handler class matches a given model isn't recorded in the GGUF
+    metadata discover_gguf_vlm_models() can see, so this makes a
+    best-effort guess from the filename and falls back to the most
+    broadly-compatible handler (Llava15ChatHandler — works for the
+    majority of llava-clip-style vision GGUF releases) if nothing more
+    specific matches. A wrong handler guess doesn't necessarily crash,
+    but can produce poor answers, since it feeds the model the wrong
+    image-token/prompt format — if that happens, check whether a newer
+    llama-cpp-python ships a more specific handler for that model family.
+    """
+
+    # Filename substring -> chat_handler class name in
+    # llama_cpp.llama_chat_format. Checked in order; first match wins.
+    _HANDLER_HINTS = (
+        ("minicpm-v-2.6", "MiniCPMv26ChatHandler"),
+        ("minicpm-v",     "MiniCPMv26ChatHandler"),
+        ("moondream2",    "Moondream2ChatHandler"),
+        ("moondream",     "MoondreamChatHandler"),
+        ("nanollava",     "NanoLlavaChatHandler"),
+        ("nanovlm",       "NanoLlavaChatHandler"),
+        ("llava-1.6",     "Llava16ChatHandler"),
+        ("llava-v1.6",    "Llava16ChatHandler"),
+        ("llava1.6",      "Llava16ChatHandler"),
+        ("llava-1.5",     "Llava15ChatHandler"),
+        ("llava-v1.5",    "Llava15ChatHandler"),
+    )
+    _DEFAULT_HANDLER = "Llava15ChatHandler"
+
+    def __init__(self, model_path: str, mmproj_path: str, n_ctx: int = 4096,
+                 n_gpu_layers: int = -1):
+        self.model_path  = model_path
+        self.mmproj_path = mmproj_path
+
+        from llama_cpp import llama_chat_format
+
+        handler_name = self._DEFAULT_HANDLER
+        stem_lower = Path(model_path).stem.lower()
+        for hint, name in self._HANDLER_HINTS:
+            if hint in stem_lower and hasattr(llama_chat_format, name):
+                handler_name = name
+                break
+        if not hasattr(llama_chat_format, handler_name):
+            raise RuntimeError(
+                f"Installed llama-cpp-python has no '{handler_name}' chat "
+                f"handler — upgrade it to use GGUF vision models: "
+                f"pip install --upgrade llama-cpp-python"
+            )
+        self.handler_name = handler_name
+        HandlerClass = getattr(llama_chat_format, handler_name)
+        print(f"[llama.cpp VLM] Loading '{model_path}' + mmproj "
+              f"'{mmproj_path}' using {handler_name} …")
+        chat_handler = HandlerClass(clip_model_path=mmproj_path, verbose=False)
+
+        try:
+            self.llm = LlamaCppBackend(
+                model_path=model_path,
+                chat_handler=chat_handler,
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                logits_all=True,  # required for multimodal on some llama-cpp-python versions
+                verbose=False,
+            )
+        except TypeError:
+            # Newer llama-cpp-python releases dropped logits_all entirely.
+            self.llm = LlamaCppBackend(
+                model_path=model_path,
+                chat_handler=chat_handler,
+                n_ctx=n_ctx,
+                n_gpu_layers=n_gpu_layers,
+                verbose=False,
+            )
+
+    @staticmethod
+    def _image_to_data_url(img) -> str:
+        import base64
+        from io import BytesIO
+        buf = BytesIO()
+        img.convert("RGB").save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        return f"data:image/png;base64,{b64}"
+
+    def answer(self, question: str, images: list, context: str = "",
+               max_tokens: int = 512, temperature: float = 0.6) -> str:
+        user_text = question + (f"\n\nContext:\n{context}" if context else "")
+        content = [{"type": "image_url", "image_url": {"url": self._image_to_data_url(img)}}
+                   for img in images]
+        content.append({"type": "text", "text": user_text})
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant. Answer based on images and context."},
+            {"role": "user", "content": content},
+        ]
+        out = self.llm.create_chat_completion(
+            messages=messages, max_tokens=max_tokens, temperature=temperature,
+        )
+        return out["choices"][0]["message"]["content"].strip()

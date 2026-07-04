@@ -348,7 +348,10 @@ class RetrieverTool(Tool):
         "this before answering any question. It returns a clear 'no relevant "
         "documents found' message if the knowledge base is empty or has "
         "nothing relevant — treat that as a real answer (there is nothing to "
-        "report), not as a reason to fall back on what you already know."
+        "report), not as a reason to fall back on what you already know. "
+        "Every returned chunk is tagged with its source filename in "
+        "brackets, e.g. '[report.pdf]' — cite that exact tag in-text "
+        "immediately after any claim you draw from it."
     )
     inputs = {
         "query": {
@@ -373,10 +376,18 @@ class RetrieverTool(Tool):
         # didn't match this installed version's real internals).
         self.call_count  = 0
         self.found_count = 0
+        # Every unique source name actually returned by a successful
+        # retrieval this run — lets chat.py print a guaranteed-accurate
+        # References list after the agent answers, independent of whether
+        # the model remembered to write its own in-text citations (same
+        # "track it ourselves, don't just trust the model" reasoning as
+        # call_count/found_count above).
+        self.sources_used = set()
 
     def reset_stats(self):
         self.call_count  = 0
         self.found_count = 0
+        self.sources_used = set()
 
     def forward(self, query: str) -> str:
         assert isinstance(query, str), "Your search query must be a string"
@@ -385,4 +396,5 @@ class RetrieverTool(Tool):
         if not context:
             return "No relevant documents found — the knowledge base may be empty."
         self.found_count += 1
+        self.sources_used.update(sources)
         return f"Retrieved documents (sources: {', '.join(sources)}):\n\n{context}"
