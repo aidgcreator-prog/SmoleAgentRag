@@ -661,7 +661,7 @@ DEVELOPER_LOGO_B64 = _load_logo_b64()
 DEVELOPER_NAME = "LocalAiLab"
 APP_NAME_EN = "Multipurpose AI Assistant"
 APP_NAME_KH = "ជំនួយការ AI ពហុមុខងារ"
-APP_VERSION = "1.2.0-beta"
+APP_VERSION = "0.0.1-beta"
 
 # ──────────────────────────────────────────────────────────────────
 # About tab — always shown bilingually (Khmer first, English below),

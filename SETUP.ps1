@@ -1,6 +1,6 @@
-$OutputEncoding = [System.Text.Encoding]::UTF8
+﻿$OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-try { $Host.UI.RawUI.WindowTitle = "ភ្នាក់ងារ RAG - ការដំឡើង" } catch {}
+try { $Host.UI.RawUI.WindowTitle = "ជំនួយការ AI ពហុមុខងារ - ការដំឡើង" } catch {}
 
 function Refresh-Path {
     $sys = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -10,7 +10,7 @@ function Refresh-Path {
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
-Write-Host " ការដំឡើងភ្នាក់ងារ RAG - smolagents + ChromaDB + Gemma4 / Qwen3.6" -ForegroundColor Green
+Write-Host " ការដំឡើងជំនួយការ AI ពហុមុខងារ ដោយ LocalAiLab - smolagents + ChromaDB + llama.cpp" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host ""
 
@@ -19,7 +19,7 @@ Set-Location $root
 
 # ── STEP 0: Check we are in the right folder ─────────────────────
 if (-not (Test-Path (Join-Path $root "app.py"))) {
-    Write-Host "[កំហុស] រកមិនឃើញ app.py ។ សូមដំណើរការស្គ្រីបនេះពីក្នុងថត rag_agent ។" -ForegroundColor Red
+    Write-Host "[កំហុស] រកមិនឃើញ app.py ។ សូមដំណើរការស្គ្រីបនេះពីក្នុងថតឫសនៃកម្មវិធី (ថតដែលមាន app.py) ។" -ForegroundColor Red
     Read-Host "ចុច Enter ដើម្បីបិទ"
     exit 1
 }

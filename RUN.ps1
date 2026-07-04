@@ -1,10 +1,10 @@
 ﻿$OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-try { $Host.UI.RawUI.WindowTitle = "ភ្នាក់ងារ RAG - កំពុងដំណើរការ" } catch {}
+try { $Host.UI.RawUI.WindowTitle = "ជំនួយការ AI ពហុមុខងារ - កំពុងដំណើរការ" } catch {}
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " ភ្នាក់ងារ RAG - smolagents + ChromaDB + Gemma4 / Qwen3.6" -ForegroundColor Cyan
+Write-Host " ជំនួយការ AI ពហុមុខងារ ដោយ LocalAiLab - smolagents + ChromaDB + llama.cpp" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -13,7 +13,7 @@ Set-Location $root
 
 # ── Check we are in the right folder ─────────────────────────────
 if (-not (Test-Path (Join-Path $root "app.py"))) {
-    Write-Host "[កំហុស] រកមិនឃើញ app.py ។ សូមដំណើរការស្គ្រីបនេះពីក្នុងថត rag_agent ។" -ForegroundColor Red
+    Write-Host "[កំហុស] រកមិនឃើញ app.py ។ សូមដំណើរការស្គ្រីបនេះពីក្នុងថតឫសនៃកម្មវិធី (ថតដែលមាន app.py) ។" -ForegroundColor Red
     Read-Host "ចុច Enter ដើម្បីបិទ"
     exit 1
 }
@@ -73,7 +73,7 @@ if ($nvidiaOk) {
 
 # ── Launch app ────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "កំពុងចាប់ផ្តើមភ្នាក់ងារ RAG..."
+Write-Host "កំពុងចាប់ផ្តើមជំនួយការ AI ពហុមុខងារ..."
 Write-Host "បើកកម្មវិធីរុករករបស់អ្នកនៅ:  http://localhost:7861"
 Write-Host ""
 Write-Host "ចុច Ctrl+C ដើម្បីបញ្ឈប់កម្មវិធី។"
