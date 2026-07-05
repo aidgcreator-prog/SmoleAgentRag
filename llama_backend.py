@@ -65,6 +65,13 @@ if LLAMA_CPP_AVAILABLE:
 # It can also be set or changed at runtime from the "📁 GGUF Model Folder"
 # box in the UI (see set_model_dir() below) — no code edits or restart
 # required either way, and doing so updates user_config.json immediately.
+#
+# NOTE: discovery below (discover_gguf_models() / discover_gguf_vlm_models())
+# scans this folder RECURSIVELY — .gguf files in any subfolder underneath
+# it are found too, not just files sitting directly in the folder itself.
+# This lets you organize models into per-model subfolders (e.g.
+# 'D:\models\gguf\Qwen3-14B\Qwen3-14B-Q4_K_M.gguf') instead of dumping
+# every .gguf file flat into one directory.
 # ──────────────────────────────────────────────────────────────────
 LLAMA_CPP_MODEL_DIR = (
     os.environ.get("LLAMA_CPP_MODEL_DIR", "").strip()
@@ -83,9 +90,33 @@ def set_model_dir(folder_path: str) -> None:
     user_config.save_user_config({"gguf_model_dir": folder_path})
 
 
+def _relative_display_name(file_path: Path, root: Path) -> str:
+    """Build the label text for a discovered .gguf file: its stem, prefixed
+    with whatever subfolder path (relative to the scanned root) it lives
+    under, e.g. a file at '<root>/Qwen3-14B/model-Q4_K_M.gguf' becomes
+    'Qwen3-14B/model-Q4_K_M' instead of just 'model-Q4_K_M'.
+
+    This matters now that discovery recurses into subfolders — without the
+    subfolder prefix, two identically-named files in different subfolders
+    (or the same file re-quantized twice under different subfolders) would
+    produce indistinguishable dropdown labels, silently hiding all but one
+    of them (dict keys must be unique). Always uses forward slashes in the
+    displayed label, regardless of OS, so labels look consistent whether
+    scanned on Windows or Linux/Mac.
+    """
+    try:
+        rel = file_path.relative_to(root)
+    except ValueError:
+        rel = Path(file_path.name)
+    if rel.parent == Path('.'):
+        return file_path.stem
+    return str(rel.parent / file_path.stem).replace("\\", "/")
+
+
 def discover_gguf_models(folder: Optional[str] = None) -> dict:
-    """Scan a folder for .gguf files and return {label: path} entries
-    that can be merged straight into MODEL_OPTIONS.
+    """Recursively scan a folder AND ALL OF ITS SUBFOLDERS for .gguf files
+    and return {label: path} entries that can be merged straight into
+    MODEL_OPTIONS.
 
     If `folder` is not given, the current global LLAMA_CPP_MODEL_DIR is
     used. An empty/unset folder simply yields no GGUF models — the app
@@ -101,7 +132,9 @@ def discover_gguf_models(folder: Optional[str] = None) -> dict:
         return {}
     mode_tag = "llama.cpp | GPU" if LLAMA_CPP_GPU_AVAILABLE else "llama.cpp | CPU only — slow"
     found = {}
-    for f in sorted(p.glob("*.gguf")):
+    # rglob (not glob) walks every subfolder under `p`, not just its
+    # top-level contents — see the LLAMA_CPP_MODEL_DIR note above.
+    for f in sorted(p.rglob("*.gguf")):
         # mmproj (multimodal projector / CLIP vision encoder) files are
         # only usable paired with a main vision model — see
         # discover_gguf_vlm_models() below — they're not a standalone
@@ -109,13 +142,15 @@ def discover_gguf_models(folder: Optional[str] = None) -> dict:
         if "mmproj" in f.stem.lower():
             continue
         size_gb = f.stat().st_size / (1024 ** 3)
-        label = f"🦙 {f.stem}  (~{size_gb:.1f} GB | {mode_tag})"
+        display_name = _relative_display_name(f, p)
+        label = f"🦙 {display_name}  (~{size_gb:.1f} GB | {mode_tag})"
         found[label] = str(f)
     return found
 
 
 def discover_gguf_vlm_models(folder: Optional[str] = None) -> dict:
-    """Scan a folder for GGUF vision-language model PAIRS.
+    """Recursively scan a folder AND ALL OF ITS SUBFOLDERS for GGUF
+    vision-language model PAIRS.
 
     Unlike a text-only GGUF model (one .gguf file is enough),
     llama.cpp's multimodal support needs TWO files: the main model .gguf
@@ -126,15 +161,23 @@ def discover_gguf_vlm_models(folder: Optional[str] = None) -> dict:
 
     Returns {label: (model_path, mmproj_path)}.
 
-    Pairing heuristic (best effort — GGUF metadata doesn't record this):
-      - Exactly one mmproj file in the folder -> pair it with EVERY main
-        model file (the common case: a release ships one model file +
-        one mmproj file together).
-      - Multiple mmproj files -> pair each main model with whichever
-        mmproj shares the longest matching filename prefix (vision GGUF
-        releases usually name the mmproj after the model, e.g.
-        'Qwen2-VL-7B-Instruct-Q4_K_M.gguf' +
+    Pairing heuristic (best effort — GGUF metadata doesn't record this),
+    checked in order:
+      - If any mmproj file(s) live in the SAME folder as a given main
+        model file, prefer those (the common case when models are kept
+        in their own per-model subfolder alongside their mmproj file) —
+        picking the one with the longest matching filename prefix if
+        there's more than one in that folder.
+      - Otherwise, fall back to the single mmproj file anywhere under the
+        scanned root if there's only one, or the best filename-prefix
+        match across every mmproj file found anywhere under the root
+        (vision GGUF releases usually name the mmproj after the model,
+        e.g. 'Qwen2-VL-7B-Instruct-Q4_K_M.gguf' +
         'Qwen2-VL-7B-Instruct-mmproj-f16.gguf').
+    Same-folder matching is checked first specifically because recursive
+    scanning can now surface mmproj files from unrelated subfolders that
+    might otherwise look like a better filename match than the *correct*
+    (same-folder) one.
     """
     if not LLAMA_CPP_AVAILABLE:
         return {}
@@ -145,7 +188,9 @@ def discover_gguf_vlm_models(folder: Optional[str] = None) -> dict:
     if not p.exists():
         return {}
 
-    all_gguf     = sorted(p.glob("*.gguf"))
+    # rglob (not glob) walks every subfolder under `p` — see the
+    # LLAMA_CPP_MODEL_DIR note above.
+    all_gguf     = sorted(p.rglob("*.gguf"))
     mmproj_files = [f for f in all_gguf if "mmproj" in f.stem.lower()]
     main_files   = [f for f in all_gguf if "mmproj" not in f.stem.lower()]
     if not mmproj_files or not main_files:
@@ -162,11 +207,14 @@ def discover_gguf_vlm_models(folder: Optional[str] = None) -> dict:
     mode_tag = "llama.cpp | GPU" if LLAMA_CPP_GPU_AVAILABLE else "llama.cpp | CPU only — slow"
     found = {}
     for main_f in main_files:
-        best_mmproj = (mmproj_files[0] if len(mmproj_files) == 1
-                       else max(mmproj_files, key=lambda m: _shared_prefix_len(main_f.stem, m.stem)))
+        same_dir_mmproj = [m for m in mmproj_files if m.parent == main_f.parent]
+        candidates = same_dir_mmproj if same_dir_mmproj else mmproj_files
+        best_mmproj = (candidates[0] if len(candidates) == 1
+                       else max(candidates, key=lambda m: _shared_prefix_len(main_f.stem, m.stem)))
         size_gb = main_f.stat().st_size / (1024 ** 3)
         mm_gb   = best_mmproj.stat().st_size / (1024 ** 3)
-        label = (f"🦙👁️ {main_f.stem}  (~{size_gb:.1f} GB + mmproj "
+        display_name = _relative_display_name(main_f, p)
+        label = (f"🦙👁️ {display_name}  (~{size_gb:.1f} GB + mmproj "
                  f"~{mm_gb:.1f} GB | {mode_tag})")
         found[label] = (str(main_f), str(best_mmproj))
     return found
