@@ -6,7 +6,7 @@ bilingual ℹ️ About tab content.
 import base64
 from pathlib import Path
 
-_LOGO_PATH = Path(__file__).parent / "assets" / "logo.jpg"
+_LOGO_PATH = Path(__file__).parent / "image" / "logo.jpg"
 
 
 def _load_logo_b64() -> str:

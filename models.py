@@ -44,7 +44,35 @@ _llm_n_ctx           = None
 # ──────────────────────────────────────────────────────────────────
 _MIN_TRANSFORMERS_VERSION = {
     "ornith": "5.8.1",
+    # Qwen3.6 (dense Qwen3.6-27B, MoE Qwen3.6-35B-A3B) uses the "qwen3_5"
+    # architecture — confirmed via community reports that transformers
+    # <5.2.0 doesn't recognize it (same "config class not found" failure
+    # mode as Ornith above). Not currently wired into any HF dropdown —
+    # see model_registry.QWEN36_IDS — but guarded here defensively so
+    # loading it (if ever registered) fails with a clear upgrade message
+    # rather than a cryptic AutoModel crash, same as every other guard here.
+    "qwen36": "5.2.0",
+    # Gemma 4 (E2B/E4B/12B/26B-A4B/31B) introduced the "gemma4" model type
+    # in transformers 5.5.0 — confirmed directly via huggingface/transformers
+    # issue #45376 and multiple vLLM/llm-compressor compatibility reports.
+    # Google's own docs recommend >=5.10.1. Below 5.5.0, AutoConfig can't
+    # even parse the checkpoint's config.json (fails with a confusing
+    # "'list' object has no attribute 'keys'" deep in tokenizer setup,
+    # not a clear version message) — this guard replaces that with an
+    # actionable error. Applies to google/gemma-4-E2B-it (the app's
+    # existing default!) as much as any newly-registered Gemma 4 size.
+    "gemma4": "5.10.1",
 }
+
+# Model-id-set -> (version-guard key, human-readable architecture note).
+# Checked in order; first matching set wins. Table-driven so adding a new
+# guarded family is one line here instead of another elif branch.
+def _version_guard_families():
+    return (
+        (mr.ORNITH_IDS, "ornith", "Qwen3.5 hybrid linear-/full-attention architecture"),
+        (mr.QWEN36_IDS, "qwen36", "Qwen3.6 (qwen3_5) architecture"),
+        (mr.GEMMA4_IDS, "gemma4", "Gemma 4 (gemma4) multimodal architecture"),
+    )
 
 
 def _version_tuple(version_str: str) -> tuple:
@@ -63,15 +91,21 @@ def _check_transformers_version_for(model_id: str) -> None:
     """Raise a clear, actionable RuntimeError if the installed
     `transformers` version is too old to load `model_id`, instead of
     letting a cryptic internal AutoModel error surface first."""
-    if model_id not in mr.ORNITH_IDS:
+    min_version = None
+    arch_note = None
+    for id_set, guard_key, note in _version_guard_families():
+        if model_id in id_set:
+            min_version = _MIN_TRANSFORMERS_VERSION[guard_key]
+            arch_note = note
+            break
+    if min_version is None:
         return
-    min_version = _MIN_TRANSFORMERS_VERSION["ornith"]
     import transformers as _tf
     installed = getattr(_tf, "__version__", "0")
     if _version_tuple(installed) < _version_tuple(min_version):
         raise RuntimeError(
             f"'{model_id}' needs transformers >= {min_version} — it's a "
-            f"Qwen3.5 hybrid linear-/full-attention architecture that older "
+            f"{arch_note} that older "
             f"transformers releases don't recognize. You have {installed} "
             f"installed.\n\n"
             f"Upgrade with:\n"

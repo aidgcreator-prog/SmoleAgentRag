@@ -182,6 +182,27 @@ python app.py
 
 </details>
 
+<details open>
+<summary><strong>ជម្រើសម៉ូដែលតាមកម្រិតផ្នែករឹង (ជម្រើសកម្រិតខ្ពស់ជាង)</strong></summary>
+
+តារាងខាងក្រោមផ្តល់ជូននូវសំណុំម៉ូដែល GGUF ដែលមានសមត្ថភាពខ្ពស់ជាងសម្រាប់អ្នកប្រើប្រាស់ដែលមានផ្នែករឹងខ្លាំង — ត្រូវទាញយក ហើយកំណត់ចេញពី "📁 ថតម៉ូដែល GGUF" ដូចម៉ូដែល `.gguf` ផ្សេងទៀត។
+
+| ផ្នែករឹង | ម៉ូដែល Agent (សន្ទនា/Data Analysis) | ម៉ូដែល RAG | ម៉ូដែលចក្ខុវិស័យ (HF/transformers) | ម៉ូដែល Embedding |
+|---|---|---|---|---|
+| **CPU តែប៉ុណ្ណោះ (64–128 GB RAM)** | **Qwen3.6-35B-A3B (GGUF, MoE — ត្រូវការតែ ~3B active params/token ដូច្នេះលឿននៅលើ CPU)**<br>https://huggingface.co/ggml-org/Qwen3.6-35B-A3B-GGUF | **Gemma-4-12B-it (GGUF)**<br>https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF | **Qwen2.5-VL-7B-Instruct (GGUF)**<br>https://huggingface.co/unsloth/Qwen2.5-VL-7B-Instruct-GGUF | **BGE-M3**<br>https://huggingface.co/BAAI/bge-m3 |
+| **8 GB VRAM** | **Qwen3-8B (GGUF)**<br>https://huggingface.co/Qwen/Qwen3-8B-GGUF | **Gemma-4-12B-it (GGUF) — ⚠️ តឹងចង្អៀត សូមមើលចំណាំខាងក្រោម** (ដូចខាងលើ) | **Qwen2.5-VL-7B-Instruct (GGUF)** (ដូចខាងលើ) | **BGE-M3** (ដូចខាងលើ) |
+| **16 GB VRAM** | **Qwen3-14B (GGUF)**<br>https://huggingface.co/MaziyarPanahi/Qwen3-14B-GGUF | **Gemma-4-12B-it (GGUF)** (ដូចខាងលើ) | **Qwen2.5-VL-7B-Instruct (GGUF)** (ដូចខាងលើ) | **BGE-M3** (ដូចខាងលើ) |
+| **24 GB VRAM** | **Qwen3-32B (GGUF)**<br>https://huggingface.co/MaziyarPanahi/Qwen3-32B-GGUF | **Gemma-4-26B-A4B-it (GGUF)**<br>https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF | **Gemma-4-12B-it (GGUF)**<br>https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF | **Qwen3-Embedding-4B**<br>https://huggingface.co/Qwen/Qwen3-Embedding-4B |
+| **48 GB+ VRAM** | **Qwen3-32B (GGUF)** (ដូចខាងលើ) | **Gemma-4-31B-it (GGUF)**<br>https://huggingface.co/ggml-org/gemma-4-31B-it-GGUF | **Gemma-4-31B-it (GGUF)** (ដូចខាងលើ) | **Jina Embeddings v4**<br>https://huggingface.co/jinaai/jina-embeddings-v4 |
+
+> ⚠️ **ចំណាំពិសេសអំពី 8 GB VRAM**៖ `Gemma-4-12B-it` នៅ Q4_K_M ត្រូវការទំហំ weight ត្រឹមតែ ~7.4 GB ដោយខ្លួនឯង — នេះស្ទើរតែមិនទុកទំហំសម្រាប់ KV cache ទេនៅលើកាត 8GB ជាពិសេសបើ Context Window (សូមមើលបញ្ជីទម្លាក់ "🧠 វិន្ដូបរិបទ" ក្នុង UI) ត្រូវបានកំណត់ធំជាង 8K។ ប្រសិនបើអ្នកជួប OOM លើកម្រិតនេះ សូមបន្ថយ Context Window ជាមុនសិន ឬប្តូរទៅ `Gemma-4-E4B-it` ដែលស្រាលជាង។
+>
+> **CPU តែប៉ុណ្ណោះ**៖ ចាប់តាំងពី Qwen3.6-35B-A3B ជាម៉ូដែល MoE (ត្រូវការតែ ~3B active parameters ក្នុងមួយ token ទោះបីជាទំហំសរុប 35B) វាដំណើរការបានលឿនគួរសមនៅលើ CPU ដែលមាន RAM 64–128GB — ខុសពីម៉ូដែល dense ដូចជា Qwen3-8B ដែលត្រូវការគណនាគ្រប់ parameter ទាំងអស់ជានិច្ច។
+
+> ⚠️ **សំខាន់**៖ `Gemma-4-12B-it` / `Gemma-4-31B-it` ខ្លួនវាផ្ទាល់ជាម៉ូដែលចក្ខុវិស័យ (image-in, encoder-free) ដែរ ប៉ុន្តែកម្មវិធីនេះមិនទាន់ស្គាល់ chat-handler របស់វានៅឡើយទេ (`llama_backend.py` បច្ចុប្បន្នស្គាល់តែ LLaVA/MiniCPM-V/Moondream/nanoLLaVA) — ដូច្នេះការប្រើវាជា "🎨 Vision LLM" (GGUF) ក្នុងកម្មវិធីនេះ ត្រូវការកែកូដបន្ថែមសិន។ `Qwen2.5-VL-7B-Instruct` (HuggingFace/transformers) នៅតែជាជម្រើសសុវត្ថិភាពបំផុតដែលដំណើរការភ្លាមៗ។ ចំណែក `Qwen3-VL` (ជំនាន់ថ្មីជាង Qwen2.5-VL) ត្រូវបានគាំទ្រដោយ llama.cpp ចាប់តាំងពីចុងខែតុលា ២០២៥ តាមរយៈឧបករណ៍ `llama-mtmd-cli`/`llama-server` ថ្មី ប៉ុន្តែក៏ត្រូវការការកែសម្រួល `llama_backend.py` ដូចគ្នា មុននឹងអាចប្រើក្នុងកម្មវិធីនេះបាន។
+
+</details>
+
 ---
 
 ### 📂 រចនាសម្ព័ន្ធឯកសារ
@@ -391,6 +412,27 @@ You can change models at runtime via the UI's model selection dropdowns.
 | ~10 GB | `openai/whisper-large-v3` (best accuracy, multilingual incl. Khmer) |
 | ~1 GB | `seanghay/whisper-small-khmer-v2` 🇰🇭 (Khmer-tuned) |
 | ~6 GB | `metythorn/whisper-large-v3-turbo-mixed-20eps-clean-text-197k` 🇰🇭 (best for Khmer) |
+
+</details>
+
+<details open>
+<summary><strong>Model combos by hardware tier (higher-end options)</strong></summary>
+
+For people with beefier hardware who want noticeably stronger local models than the defaults above, here's a tiered combo — all still `.gguf` files you drop into your configured GGUF folder like any other model.
+
+| Hardware | Agent Model (Chat/Data Analysis) | RAG Model | Vision Model (HF/transformers) | Embedding Model |
+|---|---|---|---|---|
+| **CPU Only (64–128 GB RAM)** | **Qwen3.6-35B-A3B (GGUF, MoE — only ~3B active params/token, so it stays fast on CPU)**<br>https://huggingface.co/ggml-org/Qwen3.6-35B-A3B-GGUF | **Gemma-4-12B-it (GGUF)**<br>https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF | **Qwen2.5-VL-7B-Instruct (GGUF)**<br>https://huggingface.co/unsloth/Qwen2.5-VL-7B-Instruct-GGUF | **BGE-M3**<br>https://huggingface.co/BAAI/bge-m3 |
+| **8 GB VRAM** | **Qwen3-8B (GGUF)**<br>https://huggingface.co/Qwen/Qwen3-8B-GGUF | **Gemma-4-12B-it (GGUF) — ⚠️ tight fit, see note below** (same as above) | **Qwen2.5-VL-7B-Instruct (GGUF)** (same as above) | **BGE-M3** (same as above) |
+| **16 GB VRAM** | **Qwen3-14B (GGUF)**<br>https://huggingface.co/MaziyarPanahi/Qwen3-14B-GGUF | **Gemma-4-12B-it (GGUF)** (same as above) | **Qwen2.5-VL-7B-Instruct (GGUF)** (same as above) | **BGE-M3** (same as above) |
+| **24 GB VRAM** | **Qwen3-32B (GGUF)**<br>https://huggingface.co/MaziyarPanahi/Qwen3-32B-GGUF | **Gemma-4-26B-A4B-it (GGUF)**<br>https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF | **Gemma-4-12B-it (GGUF)**<br>https://huggingface.co/ggml-org/gemma-4-12B-it-GGUF | **Qwen3-Embedding-4B**<br>https://huggingface.co/Qwen/Qwen3-Embedding-4B |
+| **48 GB+ VRAM** | **Qwen3-32B (GGUF)** (same as above) | **Gemma-4-31B-it (GGUF)**<br>https://huggingface.co/ggml-org/gemma-4-31B-it-GGUF | **Gemma-4-31B-it (GGUF)** (same as above) | **Jina Embeddings v4**<br>https://huggingface.co/jinaai/jina-embeddings-v4 |
+
+> ⚠️ **8 GB VRAM note**: `Gemma-4-12B-it` at Q4_K_M is already ~7.4 GB of weights alone — that leaves very little headroom for KV cache on an 8 GB card, especially if the "🧠 Context Window" dropdown in the UI is set above 8K. If you hit an out-of-memory error at this tier, lower the context window first, or switch to the lighter `Gemma-4-E4B-it` instead.
+>
+> **CPU Only**: Qwen3.6-35B-A3B is a MoE model — only ~3B of its 35B total parameters are active per token — so it stays reasonably fast on a 64–128 GB RAM CPU-only rig, unlike a dense model like Qwen3-8B, which always computes every parameter.
+
+> ⚠️ **Compatibility note**: `Gemma-4-12B-it` / `Gemma-4-31B-it` are themselves natively multimodal (encoder-free, take image input directly) — but this app's GGUF vision loader (`llama_backend.py`) only recognizes the LLaVA/MiniCPM-V/Moondream/nanoLLaVA chat-handler families right now, not Gemma 4's format. So using them as this app's "🎨 Vision LLM" (GGUF path) needs a small code update first — until then, `Qwen2.5-VL-7B-Instruct` via the HuggingFace/transformers backend is the option that works out of the box. Similarly, `Qwen3-VL` (a newer, likely stronger vision-language family than Qwen2.5-VL) gained llama.cpp support in late October 2025 via the newer `llama-mtmd-cli`/`llama-server` multimodal path, but also isn't wired up in this app's handler-detection list yet.
 
 </details>
 

@@ -43,13 +43,28 @@ MEMORY_TAB_KEY = "rag"
 # once, at agent construction, if this smolagents version supports it).
 # ──────────────────────────────────────────────────────────────────
 STRICT_SYSTEM_INSTRUCTIONS = (
-    "You are a strict retrieval-augmented assistant. You must answer ONLY "
-    "using information returned by the `retriever` tool, which searches the "
-    "user's own indexed knowledge base. Never answer from your own general "
-    "knowledge or training data, even if you believe you know the answer. "
-    "Always call `retriever` before answering. If the retrieved documents "
-    "don't contain the answer, say clearly that the knowledge base doesn't "
-    "contain this information — do not guess or fill the gap yourself.\n\n"
+    "You are a strict retrieval-augmented assistant.\n\n"
+    "THE ONLY TOOL THAT EXISTS is `retriever`, which searches the user's "
+    "own indexed knowledge base. There is NO other tool — in particular "
+    "there is no `conversation_history`, `memory`, `get_previous_messages`, "
+    "or similar function. NEVER call, import, or reference a function that "
+    "isn't `retriever`; if you do, it will fail with a 'Forbidden function "
+    "evaluation' error and waste a step.\n\n"
+    "YOUR OWN CONVERSATION HISTORY IS ALREADY VISIBLE TO YOU: every earlier "
+    "user message and your own earlier replies in this conversation are "
+    "already included in what you can see — you do not need a tool to "
+    "'retrieve' them. If asked what was said earlier/previously in this "
+    "chat (as opposed to a knowledge-base question), look back at the "
+    "earlier turns you can already see and answer from them directly — do "
+    "NOT guess or invent content that isn't actually there.\n\n"
+    "For actual questions about the user's documents, you must answer ONLY "
+    "using information returned by the `retriever` tool. Never answer from "
+    "your own general knowledge or training data, even if you believe you "
+    "know the answer. Always call `retriever` before answering such a "
+    "question. If the retrieved documents don't contain the answer, say "
+    "clearly that the knowledge base doesn't contain this information — do "
+    "not guess or fill the gap yourself. Don't repeat the exact same "
+    "`retriever` query more than once — refine it or stop.\n\n"
     "CITATION REQUIREMENT: every chunk the retriever returns is tagged with "
     "its source in brackets, e.g. '[report.pdf]'. Cite that exact bracketed "
     "tag in-text immediately after every claim you make from it (e.g. "
@@ -138,11 +153,20 @@ def get_retriever_stats() -> tuple:
     return _rag_tool.call_count, _rag_tool.found_count, set(_rag_tool.sources_used)
 
 
-def _build_code_agent(llm, tool: RetrieverTool) -> CodeAgent:
+RAG_AGENT_DEFAULT_MAX_STEPS = 6
+
+
+def _build_code_agent(llm, tool: RetrieverTool, model_id: str = "") -> CodeAgent:
+    # See general_agent._build_code_agent()'s comment / model_registry.
+    # get_max_steps_for_model() — larger/slower local GGUF models pay a
+    # much higher per-step cost when a parsing loop goes wrong, so their
+    # step budget is scaled down to fail fast instead of grinding through
+    # the full default.
+    max_steps = mr.get_max_steps_for_model(model_id, RAG_AGENT_DEFAULT_MAX_STEPS)
     kwargs = dict(
         model=llm,
         tools=[tool],
-        max_steps=6,
+        max_steps=max_steps,
         verbosity_level=1,
     )
     # smolagents' CodeAgent normally expects the model to wrap its answer in
@@ -181,13 +205,13 @@ def get_rag_agent(model_id: Optional[str] = None):
         print(f"[RAGAgent] Building CodeAgent on '{target}' …")
         llm = models.get_llm(target)
         _rag_tool  = RetrieverTool()
-        _rag_agent = _build_code_agent(llm, _rag_tool)
+        _rag_agent = _build_code_agent(llm, _rag_tool, target)
         _rag_agent_model_id = target
-        # Restore this model's persisted memory (if any) — see
-        # agent_memory.py's module docstring for why this is keyed per
-        # (tab, model_id) rather than replayed across model switches.
-        if agent_memory.load_agent_memory_into(_rag_agent, MEMORY_TAB_KEY, target):
-            print(f"[RAGAgent] Restored persisted memory for '{target}'.")
+        # Restore this tab's persisted memory (if any) — GLOBAL across
+        # every model now, not keyed per (tab, model_id). See
+        # agent_memory.py's module docstring for the tradeoffs.
+        if agent_memory.load_agent_memory_into(_rag_agent, MEMORY_TAB_KEY):
+            print(f"[RAGAgent] Restored persisted (global) memory for '{target}'.")
         return _rag_agent
 
 

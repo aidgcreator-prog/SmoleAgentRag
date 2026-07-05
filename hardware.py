@@ -12,6 +12,96 @@ import torch
 
 class HardwareManager:
     @staticmethod
+    def detect_vram_gb() -> Optional[float]:
+        """Best-effort total VRAM (in GB) of the primary CUDA GPU, if any.
+
+        Returns None if there's no CUDA GPU, or detection fails for any
+        reason — callers should treat None as "unknown", not "zero", since
+        a failed *detection* is not the same as genuinely having no GPU.
+        """
+        try:
+            if torch.cuda.is_available():
+                props = torch.cuda.get_device_properties(0)
+                return props.total_memory / (1024 ** 3)
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def detect_system_ram_gb() -> Optional[float]:
+        """Best-effort total system RAM (in GB).
+
+        Prefers `psutil` (not a hard requirement of this app — see
+        requirements.txt) since it's cross-platform; falls back to
+        reading /proc/meminfo directly on Linux if psutil isn't
+        installed. Returns None if neither approach works (e.g. Windows
+        without psutil) — callers should treat this the same as an
+        unknown GPU: fall back to a conservative default tier rather than
+        guessing a number that could be wildly wrong.
+        """
+        try:
+            import psutil
+            return psutil.virtual_memory().total / (1024 ** 3)
+        except Exception:
+            pass
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        kb = int(line.split()[1])
+                        return kb / (1024 ** 2)
+        except Exception:
+            pass
+        return None
+
+    # ──────────────────────────────────────────────────────────────
+    # Hardware tiers — mirrors the "Model combos by hardware tier" table
+    # in README.md exactly, so the HF-side dynamic model registry (see
+    # model_registry.get_recommended_hf_models()) recommends the same
+    # models the README documents for each tier. Checked from the
+    # top (most capable) down, so a machine that qualifies for a higher
+    # tier is never mistakenly placed in a lower one.
+    # ──────────────────────────────────────────────────────────────
+    TIER_48GB_VRAM = "48gb_vram"
+    TIER_24GB_VRAM = "24gb_vram"
+    TIER_16GB_VRAM = "16gb_vram"
+    TIER_8GB_VRAM  = "8gb_vram"
+    TIER_CPU_ONLY  = "cpu_only"
+    TIER_UNKNOWN   = "unknown"
+
+    @staticmethod
+    def detect_hardware_tier() -> str:
+        """Classify the current machine into one of the README's hardware
+        tiers, based on detected VRAM (if a CUDA GPU is present) or system
+        RAM (CPU-only case). Returns TIER_UNKNOWN if neither VRAM nor RAM
+        could be determined — callers should fall back to the app's
+        existing small defaults (BASE_MODEL_OPTIONS) in that case rather
+        than guessing a tier that might recommend a model too large for
+        the actual machine.
+        """
+        vram_gb = HardwareManager.detect_vram_gb()
+        if vram_gb is not None:
+            if vram_gb >= 44:   # 48 GB tier — a little headroom below the nominal 48
+                return HardwareManager.TIER_48GB_VRAM
+            if vram_gb >= 20:   # 24 GB tier
+                return HardwareManager.TIER_24GB_VRAM
+            if vram_gb >= 14:   # 16 GB tier
+                return HardwareManager.TIER_16GB_VRAM
+            if vram_gb >= 6:    # 8 GB tier — some headroom below nominal 8
+                return HardwareManager.TIER_8GB_VRAM
+            # A CUDA GPU exists but has less VRAM than any tier above
+            # assumes — safer to fall back to CPU-only-style (smaller)
+            # recommendations than to recommend an 8GB-tier model that
+            # won't fit.
+            return HardwareManager.TIER_CPU_ONLY
+
+        ram_gb = HardwareManager.detect_system_ram_gb()
+        if ram_gb is not None and ram_gb >= 56:   # 64GB tier — some headroom below nominal 64
+            return HardwareManager.TIER_CPU_ONLY
+
+        return HardwareManager.TIER_UNKNOWN
+
+    @staticmethod
     def detect_nvidia_cuda_version() -> Optional[str]:
         try:
             result = subprocess.run(["nvidia-smi"], capture_output=True, text=True, check=False)

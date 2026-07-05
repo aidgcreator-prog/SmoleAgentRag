@@ -46,14 +46,47 @@ matching `smolagents.memory` class's constructor (`Cls(**dict)`) to
 reconstruct — so it stays correct across smolagents versions without this
 app hand-guessing field names.
 
-Memory is saved per (tab, model_id): replaying one model's memory into a
-DIFFERENT model/chat-template is exactly what caused the "No user query
-found in messages" crash on Gemma (see llama_backend.py's
-_to_plain_messages() fix) — different templates format/expect turns
-differently, so persisted memory is only loaded back for the same model
-it was created with.
+Memory scope: GLOBAL PER TAB, NOT PER MODEL
+--------------------------------------------
+Earlier versions of this file namespaced persisted memory by
+(tab, model_id), specifically to avoid replaying one model's memory into
+a DIFFERENT model/chat-template — that mismatch is what originally caused
+the "No user query found in messages" crash on Gemma (see
+llama_backend.py's _to_plain_messages() fix).
+
+Memory is now GLOBAL PER TAB instead: one memory file per tab (General /
+RAG / Data Analysis), shared across every model used in that tab,
+regardless of which model wrote which turn. This means switching models
+mid-conversation (e.g. Qwen3 -> Gemma -> a GGUF model) carries the full
+conversation forward instead of starting that model over with a blank
+slate.
+
+The tradeoff this reintroduces: a step written by one model's tool-call
+format, when replayed into a different model/template, can occasionally
+produce a slightly confused answer. This is now a soft-degradation risk
+rather than a hard crash risk, for two independent reasons:
+  1. llama_backend.py's LlamaCppModel._to_plain_messages() already
+     guarantees at least one 'user' turn is present (injecting a
+     placeholder "(continue)" turn otherwise) before handing messages to
+     a GGUF chat template, and its generate() catches template-rejection
+     ValueErrors and returns a friendly in-chat message instead of
+     raising.
+  2. Every chat.py handler (chat_general_agentic, chat_rag's agentic
+     path, run_data_analysis) already wraps agent.run() in a try/except
+     that surfaces any remaining failure as assistant text with a
+     traceback, rather than crashing the whole request.
+So a bad cross-model replay degrades to "confused answer" or "visible
+error in chat", never a hard crash — an acceptable tradeoff for getting
+genuinely global conversation memory.
+
+A one-time migration path is included: if no global memory file exists
+yet for a tab, load_agent_memory_into() falls back to the most recently
+modified LEGACY per-(tab, model) file (the old naming scheme) so
+upgrading from the previous version doesn't silently lose existing
+conversation history.
 """
 
+import inspect
 import json
 from pathlib import Path
 from typing import Optional
@@ -95,8 +128,48 @@ def _safe_slug(text: str) -> str:
     return "".join(c if c.isalnum() or c in keep else "_" for c in str(text))[-120:]
 
 
-def _memory_file_path(tab_key: str, model_id: str) -> Path:
-    return AGENT_MEMORY_DIR / f"{_safe_slug(tab_key)}__{_safe_slug(model_id)}.json"
+def _memory_file_path(tab_key: str) -> Path:
+    """Global (not per-model) memory file — one file per tab, shared
+    across every model used in that tab. See the module docstring above
+    for why this is no longer namespaced by model_id."""
+    return AGENT_MEMORY_DIR / f"{_safe_slug(tab_key)}.json"
+
+
+def _legacy_per_model_files(tab_key: str) -> list:
+    """Old naming scheme was '{tab}__{model}.json' (memory namespaced per
+    (tab, model_id)). Used only for one-time migration so existing memory
+    isn't silently lost when upgrading to global (per-tab) memory. Returns
+    matching files newest-modified first."""
+    if not AGENT_MEMORY_DIR.exists():
+        return []
+    prefix = f"{_safe_slug(tab_key)}__"
+    return sorted(
+        AGENT_MEMORY_DIR.glob(f"{prefix}*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _filter_kwargs_for(cls, data: dict) -> dict:
+    """Keep only the keys `cls.__init__` actually accepts.
+
+    `step.dict()` serializes every field the CURRENTLY installed
+    smolagents version's dataclass has. If a persisted file was written
+    by a different smolagents version (extra/renamed fields — e.g. a
+    `ToolCall` that used to carry a `type` field, or a `Timing` that used
+    to carry `duration`), blindly doing `cls(**data)` raises a
+    TypeError("unexpected keyword argument") and previously caused the
+    ENTIRE step to be dropped (see load_agent_memory_into()'s except
+    clause). Filtering down to only the accepted kwargs first means a
+    version-mismatched extra field is silently ignored instead of
+    torpedoing the whole step's reconstruction.
+    """
+    try:
+        params = inspect.signature(cls.__init__).parameters
+        allowed = set(params) - {"self"}
+        return {k: v for k, v in data.items() if k in allowed}
+    except (TypeError, ValueError):
+        return data
 
 
 def _rehydrate_step_data(data: dict) -> dict:
@@ -105,30 +178,41 @@ def _rehydrate_step_data(data: dict) -> dict:
     otherwise smolagents' own to_messages() (which calls e.g. `tool_call.dict()`)
     crashes with "'dict' object has no attribute 'dict'" the first time persisted
     memory is replayed after an app reload.
+
+    Each reconstruction is filtered through _filter_kwargs_for() first so a
+    field that doesn't exist on the currently-installed class version
+    (e.g. saved by an older/newer smolagents release) is dropped instead
+    of failing the whole step.
     """
     data = dict(data)
-    
+
     if ToolCall is not None and data.get("tool_calls"):
         data["tool_calls"] = [
-            ToolCall(**tc) if isinstance(tc, dict) else tc
+            ToolCall(**_filter_kwargs_for(ToolCall, tc)) if isinstance(tc, dict) else tc
             for tc in data["tool_calls"]
         ]
-        
+
     if ChatMessage is not None and isinstance(data.get("model_output_message"), dict):
-        data["model_output_message"] = ChatMessage(**data["model_output_message"])
-        
+        data["model_output_message"] = ChatMessage(
+            **_filter_kwargs_for(ChatMessage, data["model_output_message"])
+        )
+
     if Timing is not None and isinstance(data.get("timing"), dict):
-        data["timing"] = Timing(**data["timing"])
-        
+        data["timing"] = Timing(**_filter_kwargs_for(Timing, data["timing"]))
+
     return data
 
 
-def save_agent_memory(agent, tab_key: str, model_id: str) -> None:
+def save_agent_memory(agent, tab_key: str) -> None:
     """Persist `agent.memory.steps` to disk as JSON, so conversation
     memory survives an app restart — not just a model swap within the
     same run. Call this after every `agent.run(...)` that used
     `reset=False` (i.e. whenever the "🧠 Conversation Memory" checkbox is
     on), right alongside `cap_agent_memory()`.
+
+    Global per tab: this OVERWRITES the single memory file for `tab_key`
+    regardless of which model is currently active — see the module
+    docstring for why memory is no longer namespaced per model.
 
     Each step is serialized as its own `.dict()` (mirrors
     `AgentMemory.get_succinct_steps()`'s internal use of the same method)
@@ -165,27 +249,43 @@ def save_agent_memory(agent, tab_key: str, model_id: str) -> None:
                     continue
             serialized.append({"type": step_type, "data": data})
 
-        path = _memory_file_path(tab_key, model_id)
+        path = _memory_file_path(tab_key)
         path.write_text(json.dumps(serialized, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
-        print(f"[AgentMemory] Could not save memory for '{tab_key}'/'{model_id}': {e}")
+        print(f"[AgentMemory] Could not save memory for '{tab_key}': {e}")
 
 
-def load_agent_memory_into(agent, tab_key: str, model_id: str) -> bool:
+def load_agent_memory_into(agent, tab_key: str) -> bool:
     """Load previously-saved steps from disk into `agent.memory.steps`,
     replacing whatever (empty, freshly-built-agent) memory it currently
     has — the same direct-assignment pattern smolagents' own tutorial uses
     for copying memory between agents:
         agent.memory.steps = previous_agent.memory.steps
 
+    Global per tab: loads the ONE memory file for `tab_key`, shared across
+    every model — see the module docstring for the tradeoffs this implies
+    (a step written by one model, replayed into a different model's
+    template, can occasionally look a little "off", but is guaranteed not
+    to hard-crash the turn — see llama_backend.py's guards and every
+    chat.py handler's try/except).
+
+    If no global file exists yet (e.g. right after upgrading from the old
+    per-(tab, model) scheme), falls back to the most recently modified
+    LEGACY file for this tab so existing history isn't silently lost.
+
     Returns True if memory was found and loaded, False otherwise (no
     saved file yet, or it failed to parse — either way the agent is left
     with whatever memory it already had, so this is safe to call
     unconditionally right after building a fresh agent).
     """
-    path = _memory_file_path(tab_key, model_id)
+    path = _memory_file_path(tab_key)
     if not path.exists():
-        return False
+        legacy_candidates = _legacy_per_model_files(tab_key)
+        if not legacy_candidates:
+            return False
+        path = legacy_candidates[0]
+        print(f"[AgentMemory] No global memory file for '{tab_key}' yet — "
+              f"migrating from legacy file '{path.name}'.")
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         steps = []
@@ -202,14 +302,14 @@ def load_agent_memory_into(agent, tab_key: str, model_id: str) -> bool:
                 # older smolagents version with different fields) — skip
                 # just that step rather than discarding the whole history.
                 print(f"[AgentMemory] Skipped one incompatible step while "
-                      f"loading '{tab_key}'/'{model_id}': {e}")
+                      f"loading '{tab_key}': {e}")
                 continue
         if not steps:
             return False
         agent.memory.steps = steps
         return True
     except Exception as e:
-        print(f"[AgentMemory] Could not load memory for '{tab_key}'/'{model_id}': {e}")
+        print(f"[AgentMemory] Could not load memory for '{tab_key}': {e}")
         return False
 
 
@@ -217,19 +317,20 @@ def clear_saved_memory(tab_key: str, model_id: Optional[str] = None) -> None:
     """Delete persisted memory file(s) from disk — call this alongside
     the existing 'Clear' button handlers in ui.py (which already reset
     the in-RAM agent memory via reset_agent()) so a cleared conversation
-    stays cleared across a restart too. If `model_id` is None, deletes
-    every saved file for that tab (every model it was ever saved under).
+    stays cleared across a restart too.
+
+    Global per tab: deletes the single global memory file for `tab_key`,
+    plus any leftover LEGACY per-(tab, model) files (old naming scheme),
+    so a stale legacy file can't get picked up by the migration fallback
+    in load_agent_memory_into() after a Clear. `model_id` is accepted
+    only for backward-compatible call signatures and is otherwise
+    ignored, since memory is no longer namespaced per model.
     """
     try:
-        if model_id is not None:
-            _memory_file_path(tab_key, model_id).unlink(missing_ok=True)
-            return
-        prefix = f"{_safe_slug(tab_key)}__"
-        if not AGENT_MEMORY_DIR.exists():
-            return
-        for f in AGENT_MEMORY_DIR.glob(f"{prefix}*.json"):
+        _memory_file_path(tab_key).unlink(missing_ok=True)
+        for legacy_path in _legacy_per_model_files(tab_key):
             try:
-                f.unlink()
+                legacy_path.unlink()
             except OSError:
                 pass
     except Exception as e:
@@ -271,4 +372,3 @@ def reset_if_context_changed(reset_fn, state: dict, new_key) -> bool:
         state["key"] = new_key
         return True
     return False
-

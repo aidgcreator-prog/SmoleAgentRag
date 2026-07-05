@@ -134,12 +134,12 @@ def build_ui():
                             unload_gen_btn = gr.Button(L["btn_unload"], size="sm")
                         reload_gen_out = gr.Textbox(show_label=False, interactive=False, visible=False)
                     with gr.Column(scale=7):
-                        with gr.Row():
-                            msg_gen  = gr.Textbox(placeholder=L["placeholder_gen"], show_label=False, scale=8)
-                            send_gen = gr.Button(L["btn_send"], variant="primary", scale=1)
                         with gr.Accordion(L["accordion_chat"], open=False) as acc_gen_chat:
                             bot_gen   = gr.Chatbot(height=440)
                             clear_gen = gr.Button(L["btn_clear"], size="sm")
+                        with gr.Row():
+                            msg_gen  = gr.Textbox(placeholder=L["placeholder_gen"], show_label=False, scale=8)
+                            send_gen = gr.Button(L["btn_send"], variant="primary", scale=1)
 
             # ── Tab 2: Vision Chat ────────────────────────────────
             with gr.Tab(L["tab_vision"]) as tab_vis:
@@ -164,13 +164,13 @@ def build_ui():
                             unload_vlm_btn = gr.Button(L["btn_unload"], size="sm")
                         load_vlm_out = gr.Textbox(show_label=False, interactive=False, visible=False)
                     with gr.Column(scale=7):
+                        with gr.Accordion(L["accordion_chat"], open=False) as acc_vis_chat:
+                            bot_vis   = gr.Chatbot(height=400)
+                            clear_vis = gr.Button(L["btn_clear"], size="sm")
                         with gr.Row():
                             msg_vis    = gr.Textbox(placeholder=L["placeholder_vis"], show_label=False, scale=6)
                             img_upload = gr.Image(type="pil", sources=["upload", "clipboard"], scale=2)
                             send_vis   = gr.Button(L["btn_send"], variant="primary", scale=1)
-                        with gr.Accordion(L["accordion_chat"], open=False) as acc_vis_chat:
-                            bot_vis   = gr.Chatbot(height=400)
-                            clear_vis = gr.Button(L["btn_clear"], size="sm")
 
             # ── Tab 3: Speech to Text ─────────────────────────────
             with gr.Tab(L["tab_stt"]) as tab_stt:
@@ -192,10 +192,10 @@ def build_ui():
                         with gr.Accordion(L["accordion_details"], open=False) as acc_stt_detail:
                             stt_hint_detail_md = gr.Markdown(L["stt_khmer_hint_detail"])
                     with gr.Column(scale=7):
-                        stt_audio      = gr.Audio(label=L["stt_audio_label"], sources=["microphone", "upload"], type="filepath")
-                        transcribe_btn = gr.Button(L["btn_transcribe"], variant="primary")
                         with gr.Accordion(f"📝 {L['label_res']}", open=False) as acc_stt_result:
                             stt_output = gr.Textbox(label=L["label_res"], lines=8, interactive=True)
+                        stt_audio      = gr.Audio(label=L["stt_audio_label"], sources=["microphone", "upload"], type="filepath")
+                        transcribe_btn = gr.Button(L["btn_transcribe"], variant="primary")
 
             # ── Tab 4: Data Analysis ──────────────────────────────
             with gr.Tab(L["tab_data"]) as tab_data:
@@ -213,16 +213,16 @@ def build_ui():
                         reset_data_btn = gr.Button(L["btn_reset_agent"], size="sm")
                         reset_data_out = gr.Textbox(show_label=False, interactive=False, visible=False)
                     with gr.Column(scale=7):
-                        data_file_up = gr.File(label=L["data_file_label"], file_types=[".csv", ".xlsx", ".xls"], file_count="multiple")
-                        with gr.Row():
-                            msg_data  = gr.Textbox(placeholder=L["placeholder_data"], show_label=False, scale=8)
-                            send_data = gr.Button(L["btn_send"], variant="primary", scale=1)
                         with gr.Accordion(L["accordion_chat"], open=False) as acc_data_chat:
                             bot_data   = gr.Chatbot(height=420)
                             clear_data = gr.Button(L["btn_clear"], size="sm")
                         with gr.Accordion(L["accordion_data_results"], open=False) as acc_data_results:
                             data_gallery     = gr.Gallery(label=L["label_charts"], columns=3, height=280)
                             data_report_file = gr.File(label=L["label_report_file"], interactive=False)
+                        data_file_up = gr.File(label=L["data_file_label"], file_types=[".csv", ".xlsx", ".xls"], file_count="multiple")
+                        with gr.Row():
+                            msg_data  = gr.Textbox(placeholder=L["placeholder_data"], show_label=False, scale=8)
+                            send_data = gr.Button(L["btn_send"], variant="primary", scale=1)
 
             # ── Tab 5: Knowledge Base ─────────────────────────────
             # No "⚙️ Settings" equivalent here — kept as a single column.
@@ -272,12 +272,12 @@ def build_ui():
                             unload_rag_btn = gr.Button(L["btn_unload"], size="sm")
                         reload_rag_out = gr.Textbox(show_label=False, interactive=False, visible=False)
                     with gr.Column(scale=7):
-                        with gr.Row():
-                            msg_rag  = gr.Textbox(placeholder=L["placeholder_rag"], show_label=False, scale=8)
-                            send_rag = gr.Button(L["btn_send"], variant="primary", scale=1)
                         with gr.Accordion(L["accordion_chat"], open=False) as acc_rag_chat:
                             bot_rag   = gr.Chatbot(height=440)
                             clear_rag = gr.Button(L["btn_clear"], size="sm")
+                        with gr.Row():
+                            msg_rag  = gr.Textbox(placeholder=L["placeholder_rag"], show_label=False, scale=8)
+                            send_rag = gr.Button(L["btn_send"], variant="primary", scale=1)
 
             # ── Tab 8: About ──────────────────────────────────────
             with gr.Tab(L["tab_about"]) as tab_about:
@@ -285,8 +285,16 @@ def build_ui():
                 gr.Markdown("---")
                 about_md_en = gr.Markdown(branding.about_content_en(DEVICE.upper(), APP_VERSION))
 
+        # Static placeholder at build time — kb.get_index_stats() calls
+        # models.get_chroma_collection(), which opens the ChromaDB client.
+        # Calling it inline here would force that open (and the "[RAG]
+        # ChromaDB ready …" log line) during build_ui(), before
+        # demo.launch() — i.e. exactly the eager-preload behavior this was
+        # meant to remove from app.py. Populated lazily via demo.load()
+        # below instead, same "defer until the UI actually mounts" pattern
+        # doc_table already uses (value=kb.get_doc_table, a callable).
         status_bar = gr.Textbox(
-            value=kb.get_index_stats("kh"), interactive=False,
+            value="…", interactive=False,
             show_label=False, elem_classes=["status-bar"]
         )
 
@@ -683,5 +691,11 @@ def build_ui():
         # lang_dropdown.change() needs to touch all of them, and that only
         # runs after the user explicitly switches languages, well after
         # the initial page mount has finished.
+
+        # Narrow demo.load(): populates ONLY status_bar (a single output),
+        # not the 68-component language re-init the comment above avoids.
+        # This is what actually defers the ChromaDB client open until
+        # after the UI has mounted, instead of during build_ui().
+        demo.load(kb.get_index_stats, [lang_state], [status_bar])
 
         return demo

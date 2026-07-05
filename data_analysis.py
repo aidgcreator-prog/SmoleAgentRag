@@ -129,15 +129,17 @@ def get_data_agent(model_id: Optional[str] = None):
             pass
         _data_agent = CodeAgent(**agent_kwargs)
         _data_agent_model_id = target
-        # Restore this model's persisted memory (if any). Note this can
-        # restore memory that references a PREVIOUS dataset's
-        # columns/stats if the app was restarted with the same file still
-        # uploaded — run_data_analysis()'s reset_if_context_changed() call
-        # (keyed on the uploaded file paths, independent of this) still
-        # runs on every call and will drop it again if the dataset key
-        # doesn't match, so this is safe either way.
-        if agent_memory.load_agent_memory_into(_data_agent, MEMORY_TAB_KEY, target):
-            print(f"[DataAgent] Restored persisted memory for '{target}'.")
+        # Restore this tab's persisted memory (if any) — GLOBAL across
+        # every model now, not keyed per (tab, model_id); see
+        # agent_memory.py's module docstring. Note this can restore
+        # memory that references a PREVIOUS dataset's columns/stats if the
+        # app was restarted with the same file still uploaded —
+        # run_data_analysis()'s reset_if_context_changed() call (keyed on
+        # the uploaded file paths, independent of this) still runs on
+        # every call and will drop it again if the dataset key doesn't
+        # match, so this is safe either way.
+        if agent_memory.load_agent_memory_into(_data_agent, MEMORY_TAB_KEY):
+            print(f"[DataAgent] Restored persisted (global) memory for '{target}'.")
         return _data_agent
 
 
@@ -310,8 +312,10 @@ correlation is possible). Aim for several charts, not just one.
         if use_memory:
             agent_memory.cap_agent_memory(agent, max_turns=DATA_AGENT_MEMORY_TURNS)
             # Persist to disk too, not just RAM — so memory survives an
-            # app restart, not only a same-session model switch.
-            agent_memory.save_agent_memory(agent, MEMORY_TAB_KEY, model_id)
+            # app restart, not only a same-session model switch. GLOBAL
+            # for this tab (shared across every model), not keyed by
+            # model_id — see agent_memory.py's module docstring.
+            agent_memory.save_agent_memory(agent, MEMORY_TAB_KEY)
         elapsed = time.time() - t0
 
         report_text = str(result)

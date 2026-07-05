@@ -52,7 +52,7 @@ Artifex Software ក្រោម៖
 | ម៉ូដែល | ប្រើសម្រាប់ | អាជ្ញាប័ណ្ណ |
 |---|---|---|
 | `Qwen/Qwen3-0.6B`, `Qwen3-1.7B`, `Qwen3-4B` | Text LLM | Apache License 2.0 |
-| `google/gemma-4-E2B-it` | Text LLM | [Gemma Terms of Use](https://ai.google.dev/gemma/terms) — **មិនមែន**ជា open source ដែលបានទទួលស្គាល់ដោយ OSI ទេ; រួមមាន Prohibited Use Policy និងលក្ខខណ្ឌកម្រិតការប្រើប្រាស់របស់ Google |
+| `google/gemma-4-E2B-it` | Text LLM | Apache License 2.0 (ចាប់ពី Gemma 4 តម្រូវការចាកចេញពី Gemma Terms of Use ចាស់ ទៅជាអាជ្ញាប័ណ្ណ Apache 2.0 ដែលទទួលស្គាល់ដោយ OSI — ប្រកាសដោយ Google ខែមេសា ២០២៦) |
 | `HuggingFaceTB/SmolVLM-256M-Instruct`, `SmolVLM-500M-Instruct` | Vision LLM | Apache License 2.0 |
 | `Qwen/Qwen2.5-VL-3B-Instruct` | Vision LLM | Apache License 2.0 |
 | `openai/whisper-tiny` / `base` / `small` / `large-v3` | Speech-to-text | MIT License |
@@ -63,11 +63,13 @@ Artifex Software ក្រោម៖
 | `vidore/colqwen2-v1.0` | ការទាញយកឯកសារចក្ខុវិស័យ | Apache License 2.0 |
 | ឯកសារ `.gguf` មូលដ្ឋានណាមួយដែលអ្នកផ្តល់ | Text LLM (llama.cpp) | អាស្រ័យលើអាជ្ញាប័ណ្ណដែលអ្នកនិពន្ធម៉ូដែលបានភ្ជាប់ជាមួយឯកសារនោះ — សូមពិនិត្យ model card របស់វាមុននឹងប្រើប្រាស់ |
 
-**Gemma គឺជាចំណុចដែលត្រូវប្រុងប្រយ័ត្នបំផុត**៖ វា *មិនមែន*ជាប្រភេទសេរីដូច
-Apache/MIT ទេ។ លក្ខខណ្ឌ Gemma Terms of Use របស់ Google កំណត់ការប្រើប្រាស់
-ដែលអាចទទួលយកបាន ហើយតម្រូវឱ្យអ្នកបញ្ជូនលក្ខខណ្ឌដូចគ្នានេះទៅកាន់អ្នកណាដែល
-អ្នកចែកចាយម៉ូដែល ឬលទ្ធផលដែលបានមកពីវា។ ប្រសិនបើអ្នកចែកចាយកម្មវិធីនេះជាមួយ
-Gemma ភ្ជាប់មកជាមួយ ឬជាលំនាំដើម សូមពិនិត្យលក្ខខណ្ឌទាំងនោះដោយខ្លួនឯង។
+**ចំណាំអំពី Gemma**៖ ចាប់ពី **Gemma 4** ម៉ូដែល Gemma ត្រូវបានផ្តល់អាជ្ញាប័ណ្ណ
+Apache 2.0 ដែលទទួលស្គាល់ដោយ OSI ដូចគ្នានឹងម៉ូដែលផ្សេងទៀតក្នុងតារាងនេះ —
+Google បានលុបចោល Gemma Terms of Use ចាស់ (ដែលមាន Prohibited Use Policy និង
+លក្ខខណ្ឌកម្រិតការប្រើប្រាស់) ចាប់ពីការចេញផ្សាយ Gemma 4 ក្នុងខែមេសា ២០២៦។
+ប្រសិនបើកម្មវិធីនេះប្រើម៉ូដែល Gemma ជំនាន់មុន (Gemma 1–3) ជំនាន់ទាំងនោះនៅតែ
+ស្ថិតនៅក្រោម Gemma Terms of Use ចាស់ ដែលមិនមែនជាប្រភេទសេរីដូច Apache/MIT ទេ —
+សូមពិនិត្យលក្ខខណ្ឌដោយឡែកសម្រាប់ជំនាន់ណាមួយចាស់ជាង Gemma 4។
 
 ---
 
@@ -145,7 +147,7 @@ using the model means agreeing to those terms directly with the model owner.
 | Model | Used for | License |
 |---|---|---|
 | `Qwen/Qwen3-0.6B`, `Qwen3-1.7B`, `Qwen3-4B` | Text LLM | Apache License 2.0 |
-| `google/gemma-4-E2B-it` | Text LLM | [Gemma Terms of Use](https://ai.google.dev/gemma/terms) — **not** OSI-approved open source; includes Google's Prohibited Use Policy and use-restriction terms |
+| `google/gemma-4-E2B-it` | Text LLM | Apache License 2.0 (as of Gemma 4, Google moved off the old Gemma Terms of Use to the OSI-approved Apache 2.0 license — [announced April 2026](https://opensource.googleblog.com/2026/03/gemma-4-expanding-the-gemmaverse-with-apache-20.html)) |
 | `HuggingFaceTB/SmolVLM-256M-Instruct`, `SmolVLM-500M-Instruct` | Vision LLM | Apache License 2.0 |
 | `Qwen/Qwen2.5-VL-3B-Instruct` | Vision LLM | Apache License 2.0 |
 | `openai/whisper-tiny` / `base` / `small` / `large-v3` | Speech-to-text | MIT License |
@@ -156,11 +158,13 @@ using the model means agreeing to those terms directly with the model owner.
 | `vidore/colqwen2-v1.0` | Visual document retrieval | Apache License 2.0 |
 | Any local `.gguf` file you supply | Text LLM (llama.cpp) | Whatever license the model author attached to that checkpoint — check its model card before use |
 
-**Gemma is the one to watch**: it is *not* Apache/MIT-style permissive.
-Google's Gemma Terms of Use impose acceptable-use restrictions and require
-you to pass those same terms on to anyone you distribute the model or
-derivatives to. If you ship this app with Gemma bundled or defaulted, review
-those terms yourself.
+**A note on Gemma**: as of **Gemma 4**, Google has moved Gemma onto the
+OSI-approved Apache 2.0 license, the same as the other models in this
+table — the old Gemma Terms of Use (with its Prohibited Use Policy and
+use-restriction terms) was dropped starting with the Gemma 4 release in
+April 2026. If this app ever adds an earlier Gemma generation (Gemma 1–3),
+those checkpoints remain under the old, non-permissive Gemma Terms of Use —
+review that license separately for any version older than Gemma 4.
 
 ---
 

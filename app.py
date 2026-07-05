@@ -29,16 +29,17 @@ import warnings
 
 import gradio as gr
 
-import models
-from models import get_chroma_collection
 from ui import build_ui, CSS
 
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
 if __name__ == "__main__":
-    print("[RAG] Pre-loading embeddings and ChromaDB …")
-    models.get_embed_model()
-    get_chroma_collection()
+    # No eager preload here — the embedding model loads lazily on first
+    # actual index/query/upload (models.get_embed_model()), and ChromaDB
+    # opens lazily right after the UI mounts, via status_bar's
+    # demo.load(kb.get_index_stats, ...) in ui.py. This means the app
+    # window/browser opens immediately instead of blocking on model
+    # downloads/loads before the UI is even servable.
     demo = build_ui()
     demo.launch(
         server_name="0.0.0.0",

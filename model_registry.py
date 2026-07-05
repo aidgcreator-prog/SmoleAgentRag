@@ -5,18 +5,83 @@ constants, and the "rescan GGUF folder" action that rebuilds MODEL_OPTIONS
 at runtime.
 """
 
+import re
 from typing import Optional
 
 import gradio as gr
 
 import llama_backend
 import user_config
+from hardware import HardwareManager
 from i18n import LANGUAGES
 
 # ──────────────────────────────────────────────────────────────────
 # Shared constants
 # ──────────────────────────────────────────────────────────────────
-DEFAULT_EMBED_MODEL = "BAAI/bge-m3"
+# Embedding model — dynamic default based on detected hardware tier,
+# mirroring the "Embedding Model" column of README.md's "Model combos by
+# hardware tier" table exactly:
+#   CPU-only / 8GB / 16GB VRAM -> BGE-M3     (small, works everywhere)
+#   24GB VRAM                  -> Qwen3-Embedding-4B
+#   48GB+ VRAM                 -> Jina Embeddings v4
+# Unknown hardware (detection failed) falls back to BGE-M3 — the safest
+# default, since guessing a larger embedding model on unknown hardware
+# risks an OOM on the very first index/query call.
+#
+# This only changes the DEFAULT — like context_window (see
+# get_saved_context_window() below), a value the user explicitly saved
+# to user_config.json always wins over the hardware-detected default, so
+# switching hardware tiers never silently overrides a deliberate choice.
+# ──────────────────────────────────────────────────────────────────
+EMBED_OPTIONS = {
+    "BGE-M3 (~2 GB RAM | multilingual, recommended default)": "BAAI/bge-m3",
+    "Qwen3-Embedding-4B (~8 GB RAM | 24GB+ VRAM tier)":        "Qwen/Qwen3-Embedding-4B",
+    "Jina Embeddings v4 (~qwen3-based | 48GB+ VRAM tier)":     "jinaai/jina-embeddings-v4",
+}
+
+_EMBED_MODEL_BY_TIER = {
+    HardwareManager.TIER_48GB_VRAM: "jinaai/jina-embeddings-v4",
+    HardwareManager.TIER_24GB_VRAM: "Qwen/Qwen3-Embedding-4B",
+    HardwareManager.TIER_16GB_VRAM: "BAAI/bge-m3",
+    HardwareManager.TIER_8GB_VRAM:  "BAAI/bge-m3",
+    HardwareManager.TIER_CPU_ONLY:  "BAAI/bge-m3",
+    HardwareManager.TIER_UNKNOWN:   "BAAI/bge-m3",
+}
+
+
+def get_recommended_embed_model() -> str:
+    """The embedding model README.md's hardware-tier table recommends for
+    THIS machine, based on live-detected VRAM/RAM (see
+    hardware.HardwareManager.detect_hardware_tier()). Falls back to
+    BGE-M3 if the tier can't be determined."""
+    tier = HardwareManager.detect_hardware_tier()
+    return _EMBED_MODEL_BY_TIER.get(tier, "BAAI/bge-m3")
+
+
+def get_default_embed_model() -> str:
+    """The embedding model actually used unless the user has a saved
+    override in user_config.json — a persisted choice always wins (same
+    pattern as get_saved_context_window()), so re-detecting hardware on
+    every restart never silently reverts an explicit user pick."""
+    saved = user_config.USER_CONFIG.get("embed_model")
+    if saved:
+        return saved
+    return get_recommended_embed_model()
+
+
+def set_embed_model(model_id: str) -> None:
+    """Persist an explicit embedding-model choice — mirrors
+    llama_backend.set_model_dir() / set_context_window()'s persistence
+    pattern. NOTE: changing this only takes effect on the next embedding
+    model load (models.get_embed_model() caches the loaded model); if one
+    is already loaded, the caller is responsible for resetting
+    models._embed_model, since an embedding model can't be hot-swapped
+    mid-session without also fully re-indexing every stored vector in
+    ChromaDB (embeddings from different models aren't comparable)."""
+    user_config.save_user_config({"embed_model": model_id})
+
+
+DEFAULT_EMBED_MODEL = get_default_embed_model()
 CHROMA_PERSIST_DIR  = "./chroma_db"
 VISUAL_INDEX_DIR    = "./visual_index"
 CHUNK_SIZE          = 1024
@@ -86,6 +151,64 @@ def set_context_window(n_ctx: int) -> None:
     mirrors llama_backend.set_model_dir()'s persistence pattern."""
     user_config.save_user_config({"context_window": int(n_ctx)})
 
+
+# ──────────────────────────────────────────────────────────────────
+# Agentic CodeAgent step budget — scaled down for larger/slower local
+# models. A broken step-parsing loop (e.g. a model that writes plain
+# prose instead of a ```python fenced block) costs roughly the same
+# wall-clock time PER STEP regardless of model size, but a 14B+ GGUF
+# model can take 30-250+ seconds per step where a small HF model takes
+# a few seconds — so the same default max_steps that's a harmless safety
+# net on a small model turns into a 4-20+ minute stall on a large one
+# before the agent finally gives up. See general_agent.py / rag_agent.py
+# for where this is applied.
+# ──────────────────────────────────────────────────────────────────
+_PARAM_SIZE_RE = re.compile(r'(\d+(?:\.\d+)?)\s*[bB](?![a-zA-Z])')
+
+
+def estimate_model_param_billions(model_id: str) -> Optional[float]:
+    """Best-effort parse of a model's parameter count (in billions) from
+    its id/filename, e.g.:
+      'Qwen3.6-14B-A3B-FableVibes-Q8_0.gguf'      -> 14.0
+      'qwen3-coder-30b-a3b-compacted-19b-256k...' -> 30.0 (first match wins)
+      'Qwen/Qwen3-0.6B'                           -> 0.6
+    Returns None if no confident '<number>B' pattern is found (e.g. an
+    unusually-named checkpoint) — callers should treat that as "unknown
+    size", not "small", since guessing wrong in the small direction would
+    silently remove the safety margin this exists to add.
+    """
+    if not model_id:
+        return None
+    m = _PARAM_SIZE_RE.search(str(model_id))
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def get_max_steps_for_model(model_id: str, default_max_steps: int) -> int:
+    """Scale an agentic CodeAgent's max_steps down for models estimated to
+    be 10B+ parameters, so a broken parsing/tool-calling loop on a large,
+    slow local GGUF model fails fast instead of grinding through the full
+    default step budget (each failed step can take a minute or more on
+    these models — see the module docstring above). Leaves
+    `default_max_steps` untouched if the model's size can't be confidently
+    parsed from its id/filename, since an unrecognized name is more often
+    a normal HuggingFace repo id (usually small/fast) than a huge unnamed
+    checkpoint, and it's safer to keep the normal budget than cut off a
+    model that turns out to be small.
+    """
+    size_b = estimate_model_param_billions(model_id)
+    if size_b is None:
+        return default_max_steps
+    if size_b >= 20:
+        return min(default_max_steps, 4)
+    if size_b >= 10:
+        return min(default_max_steps, 5)
+    return default_max_steps
+
 QWEN3_IDS    = {"Qwen/Qwen3-0.6B", "Qwen/Qwen3-1.7B", "Qwen/Qwen3-4B",
                 "Qwen/Qwen3-8B", "Qwen/Qwen3-14B", "Qwen/Qwen3-32B"}
 QWEN36_IDS   = {"Qwen/Qwen3.6-27B", "Qwen/Qwen3.6-35B-A3B"}
@@ -96,6 +219,18 @@ SMOL_VLM_IDS = {"HuggingFaceTB/SmolVLM-256M-Instruct", "HuggingFaceTB/SmolVLM-50
 ORNITH_IDS = {
     "deepreinforce-ai/Ornith-1.0-9B",
 }
+# Gemma 4 (all sizes) needs transformers >= 5.10.1 — see
+# models._MIN_TRANSFORMERS_VERSION["gemma4"] for the guard that checks
+# this before load. Includes google/gemma-4-E2B-it, the app's own
+# pre-existing default LLM entry — it was previously unguarded (silently
+# unloadable on a stock transformers>=4.51.0 install per requirements.txt)
+# until this set + guard were added.
+GEMMA4_IDS = {
+    "google/gemma-4-E2B-it",
+    "google/gemma-4-12B-it",
+    "google/gemma-4-26B-A4B-it",
+    "google/gemma-4-31B-it",
+}
 
 # ──────────────────────────────────────────────────────────────────
 # LLM (HuggingFace + GGUF) options
@@ -105,7 +240,30 @@ BASE_MODEL_OPTIONS = {
     "🟡 Qwen3-1.7B   (~3 GB RAM)":             "Qwen/Qwen3-1.7B",
     "🟠 Qwen2.5-Coder-3B (~6 GB RAM | small coding/agent model)": "Qwen/Qwen2.5-Coder-3B-Instruct",
     "🟡 Qwen3-4B     (~7 GB RAM)":             "Qwen/Qwen3-4B",
-    "🔵 Gemma-4-E2B  (~4 GB RAM)":             "google/gemma-4-E2B-it",
+    "🔵 Gemma-4-E2B  (~4 GB RAM | needs transformers>=5.10.1)": "google/gemma-4-E2B-it",
+    # Registered from README.md's "Model combos by hardware tier" table —
+    # these are the HF/transformers-loadable equivalents of that table's
+    # GGUF recommendations (same checkpoints, full BF16 precision instead
+    # of a quantized .gguf file — so actual RAM/VRAM use is higher than
+    # the README's GGUF-quantized figures for the same model name).
+    # Qwen3 dense sizes — same "qwen3" architecture as the existing
+    # Qwen3-0.6B/1.7B/4B above, already covered by this app's pinned
+    # transformers>=4.51.0 (see requirements.txt) — no new version guard
+    # needed, unlike Qwen3.6/Gemma 4 below.
+    "🟠 Qwen3-8B     (~16 GB RAM | 8GB-VRAM tier)":  "Qwen/Qwen3-8B",
+    "🔴 Qwen3-14B    (~30 GB RAM | 16GB-VRAM tier)": "Qwen/Qwen3-14B",
+    "🔴 Qwen3-32B    (~65 GB RAM | 24GB+/48GB+-VRAM tier)": "Qwen/Qwen3-32B",
+    # Gemma 4 — needs transformers>=5.10.1 (see models._MIN_TRANSFORMERS_
+    # VERSION["gemma4"] and model_registry.GEMMA4_IDS above); loading with
+    # an older transformers raises a clear upgrade error instead of a
+    # cryptic AutoModel crash. Natively multimodal/encoder-free — loads
+    # here via the plain text-LLM path (smolagents' TransformersModel),
+    # which works for inference/generation, though the vision/audio
+    # towers ride along unused; use the 🎨 Vision LLM dropdown instead if
+    # you specifically want Gemma 4's image understanding.
+    "🟣 Gemma-4-12B-it    (~25 GB RAM | 16GB-VRAM tier | needs transformers>=5.10.1)": "google/gemma-4-12B-it",
+    "🟣 Gemma-4-26B-A4B-it (~52 GB RAM, MoE ~4B active | 24GB-VRAM tier | needs transformers>=5.10.1)": "google/gemma-4-26B-A4B-it",
+    "🟣 Gemma-4-31B-it    (~63 GB RAM | 48GB+-VRAM tier | needs transformers>=5.10.1)": "google/gemma-4-31B-it",
 }
 
 # MODEL_OPTIONS starts as a copy of the base HuggingFace models. Any local
@@ -119,6 +277,17 @@ MODEL_OPTIONS = dict(BASE_MODEL_OPTIONS)
 MODEL_OPTIONS.update(llama_backend.discover_gguf_models())
 
 DEFAULT_LLM_LABEL = "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)"
+# NOTE: unlike DEFAULT_EMBED_MODEL / DEFAULT_VLM_LABEL above, the default
+# LLM deliberately does NOT auto-upgrade to a hardware-tier-recommended
+# larger model. The embedding model is an invisible backend component and
+# the VLM is only loaded on-demand for image questions, so picking a
+# bigger one by default is low-surprise. The main chat LLM is different:
+# silently defaulting a capable machine to a 25-65GB model would mean a
+# much longer first load with no explicit action from the user, and (for
+# the newly-registered Gemma 4 sizes) a version-guard error on any install
+# that hasn't upgraded transformers yet — bad first impression either way.
+# The larger recommended models above are fully selectable in the
+# dropdown; users on capable hardware can opt in deliberately.
 DEFAULT_LLM_MODEL = MODEL_OPTIONS[DEFAULT_LLM_LABEL]
 
 
@@ -180,6 +349,7 @@ BASE_VLM_OPTIONS = {
     "🔵 SmolVLM-256M  (~0.5 GB RAM | tiny)":  "HuggingFaceTB/SmolVLM-256M-Instruct",
     "🔵 SmolVLM-500M  (~1 GB RAM | recommended)": "HuggingFaceTB/SmolVLM-500M-Instruct",
     "🟢 Qwen2.5-VL-3B (~6 GB RAM)":           "Qwen/Qwen2.5-VL-3B-Instruct",
+    "🟠 Qwen2.5-VL-7B (~15 GB RAM | hardware-tier recommended, 16GB+ VRAM)": "Qwen/Qwen2.5-VL-7B-Instruct",
 }
 
 # VLM_OPTIONS starts as a copy of the base HuggingFace VLMs. Any local
@@ -190,7 +360,51 @@ BASE_VLM_OPTIONS = {
 # mutated in place (never reassigned) so every module that imported it
 # sees updates.
 VLM_OPTIONS = dict(BASE_VLM_OPTIONS)
-DEFAULT_VLM_LABEL = "🔵 SmolVLM-500M  (~1 GB RAM | recommended)"
+
+# Default VLM selection — dynamic per detected hardware tier, mirroring
+# README.md's "Vision Model (HF/transformers)" column: Qwen2.5-VL-7B-
+# Instruct is the recommended pick from the 16GB-VRAM tier upward, since
+# every GGUF vision option in that table needs a llama_backend.py
+# chat-handler update this app doesn't have yet (see the README's
+# "Compatibility note"). Below that tier, the existing small SmolVLM-500M
+# stays the default — a 7B VLM would be a poor default on modest/CPU-only
+# hardware. A saved user override (see set_default_vlm()) always wins,
+# same persisted-choice pattern as DEFAULT_EMBED_MODEL above.
+_VLM_LABEL_BY_TIER = {
+    HardwareManager.TIER_48GB_VRAM: "🟠 Qwen2.5-VL-7B (~15 GB RAM | hardware-tier recommended, 16GB+ VRAM)",
+    HardwareManager.TIER_24GB_VRAM: "🟠 Qwen2.5-VL-7B (~15 GB RAM | hardware-tier recommended, 16GB+ VRAM)",
+    HardwareManager.TIER_16GB_VRAM: "🟠 Qwen2.5-VL-7B (~15 GB RAM | hardware-tier recommended, 16GB+ VRAM)",
+    HardwareManager.TIER_8GB_VRAM:  "🔵 SmolVLM-500M  (~1 GB RAM | recommended)",
+    HardwareManager.TIER_CPU_ONLY:  "🔵 SmolVLM-500M  (~1 GB RAM | recommended)",
+    HardwareManager.TIER_UNKNOWN:   "🔵 SmolVLM-500M  (~1 GB RAM | recommended)",
+}
+
+
+def get_recommended_vlm_label() -> str:
+    """The Vision LLM label README.md's hardware-tier table recommends
+    for THIS machine. Falls back to the small SmolVLM-500M default if the
+    tier can't be determined."""
+    tier = HardwareManager.detect_hardware_tier()
+    return _VLM_LABEL_BY_TIER.get(tier, "🔵 SmolVLM-500M  (~1 GB RAM | recommended)")
+
+
+def get_default_vlm_label() -> str:
+    """The VLM label actually selected by default in the UI, unless the
+    user has a saved override in user_config.json — mirrors
+    get_default_embed_model()'s persisted-choice-wins pattern."""
+    saved = user_config.USER_CONFIG.get("default_vlm_label")
+    if saved and saved in VLM_OPTIONS:
+        return saved
+    return get_recommended_vlm_label()
+
+
+def set_default_vlm(label: str) -> None:
+    """Persist an explicit default-VLM choice — same pattern as
+    set_embed_model()."""
+    user_config.save_user_config({"default_vlm_label": label})
+
+
+DEFAULT_VLM_LABEL = get_default_vlm_label()
 DEFAULT_VLM_MODEL = VLM_OPTIONS[DEFAULT_VLM_LABEL]
 
 # Maps a GGUF vision model's main .gguf path -> its paired mmproj (vision

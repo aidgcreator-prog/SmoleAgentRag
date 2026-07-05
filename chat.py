@@ -186,29 +186,35 @@ def chat_general_agentic(user_message: str, history: list, model_label: str, use
         result = agent.run(user_message, reset=not use_memory)
         if use_memory:
             agent_memory.cap_agent_memory(agent, max_turns=AGENTIC_MEMORY_TURNS)
-            # Persist to disk too — see agent_memory.py's module docstring.
-            agent_memory.save_agent_memory(agent, general_agent.MEMORY_TAB_KEY, model_id)
+            # Persist to disk too — GLOBALLY for this tab (shared across
+            # every model), not keyed by model_id — see agent_memory.py's
+            # module docstring.
+            agent_memory.save_agent_memory(agent, general_agent.MEMORY_TAB_KEY)
         elapsed = time.time() - t0
 
         turn_count = sum(1 for s in agent.memory.steps if s.__class__.__name__ == "TaskStep")
         ans = str(result)
-        # Guaranteed-accurate references list, appended regardless of
-        # whether the model remembered its own in-text citations/
-        # "### References" section (general_agent.GENERAL_AGENT_INSTRUCTIONS
-        # asks it to, but — like RAG's strict grounding — that depends on
-        # the model's instruction-following and can't be fully trusted).
-        # Built from what the tracked tools ACTUALLY searched/visited this
-        # turn — see general_agent.TrackedDuckDuckGoSearchTool /
-        # TrackedVisitWebpageTool.
-        queries, urls = general_agent.get_tool_usage()
-        if urls or queries:
-            ref_lines = []
-            if urls:
-                ref_lines.append("**🔗 Pages consulted this turn:**")
-                ref_lines.extend(f"- {u}" for u in urls)
-            if queries:
-                ref_lines.append("**🔍 Searches run this turn:**")
-                ref_lines.extend(f"- \"{q}\"" for q in queries)
+        # Only show sources the model actually appears to have USED in
+        # its final answer — not every link `web_search` happened to
+        # return this turn (most search hits are never read or relied on;
+        # dumping all of them produced a misleading "sources" list full
+        # of irrelevant results, e.g. random weather sites showing up for
+        # an unrelated question just because one search query returned
+        # them). general_agent.resolve_actually_used_sources() cross-
+        # checks the model's own '### References' section against what
+        # was really searched/visited this turn, falling back to pages
+        # actually opened via visit_webpage (never to the full link dump)
+        # if the model's citations don't check out. Its own (unverified)
+        # References section is then swapped out for this verified one.
+        queries, urls, links = general_agent.get_tool_usage()
+        used_sources = general_agent.resolve_actually_used_sources(ans, urls, links)
+        ans = general_agent.strip_trailing_references_section(ans)
+        if used_sources:
+            ref_lines = ["**🔗 Sources used for this answer:**"]
+            ref_lines.extend(
+                f"- {url}" if title == url else f"- [{title}]({url})"
+                for title, url in used_sources
+            )
             ans += "\n\n---\n" + "\n".join(ref_lines)
         formatted = format_llm_response(ans)
         response = (
@@ -366,8 +372,10 @@ def chat_rag(user_message: str, history: list, model_label: str, use_agentic: bo
         result = agent.run(task, reset=not use_memory)
         if use_memory:
             agent_memory.cap_agent_memory(agent, max_turns=AGENTIC_MEMORY_TURNS)
-            # Persist to disk too — see agent_memory.py's module docstring.
-            agent_memory.save_agent_memory(agent, rag_agent.MEMORY_TAB_KEY, model_id)
+            # Persist to disk too — GLOBALLY for this tab (shared across
+            # every model), not keyed by model_id — see agent_memory.py's
+            # module docstring.
+            agent_memory.save_agent_memory(agent, rag_agent.MEMORY_TAB_KEY)
         elapsed = time.time() - t0
 
         call_count, found_count, sources_used = rag_agent.get_retriever_stats()
