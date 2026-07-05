@@ -18,6 +18,37 @@ inside a gr.render() block) — see the "Gradio 6 breaks event handler
 rebinding on render cycles" learning: defining .click()/.submit() inside a
 @gr.render() causes all buttons/dropdowns to silently stop working after
 the first language switch.
+
+INPUT-BOX CLEARING (stash-then-clear pattern)
+----------------------------------------------
+Every chat/analysis tab (General, RAG, Vision, Data Analysis) clears its
+message textbox via a two-step chained event instead of a single handler
+that both answers the question AND clears the box:
+
+    msg.submit(stash_fn, [msg], [msg, pending_state], queue=False).then(
+        do_chat_fn, [pending_state, ...], [...]
+    )
+
+Why: the actual chat/agent call can take anywhere from a few seconds to
+several minutes (agentic tabs with a slow local GGUF model hitting
+max_steps can run for minutes — see general_agent.py/rag_agent.py module
+docstrings). If that single combined call is interrupted by a dropped
+connection, a reverse-proxy/browser timeout, or any server-side exception
+that occurs outside the handler's own try/except, the textbox-clearing
+output update never reaches the browser — even though chat.py's handlers
+already return "" unconditionally in every normal case. The result is a
+textbox that appears "stuck" with the old message after a failure,
+especially on the longest-running tab (General Chat's agentic mode).
+
+The fix: split "clear the input" into its own lightweight step that runs
+FIRST, synchronously, with queue=False (so it fires immediately and isn't
+stuck behind the slow call in the queue), and STASH the just-submitted
+message into a gr.State first — never re-read the textbox's own value in
+the second step, since by then the textbox has already been cleared
+client-side and would hand the second function an empty string. This
+guarantees the box empties the instant the message is sent, independent
+of whether the subsequent chat/agent call succeeds, errors, hits
+max_steps, or the connection drops entirely.
 """
 
 import gradio as gr
@@ -133,6 +164,12 @@ def build_ui():
                             reload_gen     = gr.Button(L["btn_load"], size="sm")
                             unload_gen_btn = gr.Button(L["btn_unload"], size="sm")
                         reload_gen_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                        # Holds the just-submitted message across the
+                        # stash -> clear -> answer chain (see module
+                        # docstring: "INPUT-BOX CLEARING" above) — never
+                        # re-read msg_gen's own value inside do_chat_general,
+                        # since by then it has already been cleared.
+                        pending_gen_msg = gr.State("")
                     with gr.Column(scale=7):
                         with gr.Accordion(L["accordion_chat"], open=False) as acc_gen_chat:
                             bot_gen   = gr.Chatbot(height=440)
@@ -163,6 +200,9 @@ def build_ui():
                             load_vlm_btn   = gr.Button(L["btn_load"], size="sm")
                             unload_vlm_btn = gr.Button(L["btn_unload"], size="sm")
                         load_vlm_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                        # See pending_gen_msg above — same stash-then-clear
+                        # pattern applied to Vision Chat's message box.
+                        pending_vis_msg = gr.State("")
                     with gr.Column(scale=7):
                         with gr.Accordion(L["accordion_chat"], open=False) as acc_vis_chat:
                             bot_vis   = gr.Chatbot(height=400)
@@ -212,6 +252,9 @@ def build_ui():
                             data_memory_detail_md = gr.Markdown(L["info_memory_detail"])
                         reset_data_btn = gr.Button(L["btn_reset_agent"], size="sm")
                         reset_data_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                        # See pending_gen_msg above — same stash-then-clear
+                        # pattern applied to Data Analysis's question box.
+                        pending_data_question = gr.State("")
                     with gr.Column(scale=7):
                         with gr.Accordion(L["accordion_chat"], open=False) as acc_data_chat:
                             bot_data   = gr.Chatbot(height=420)
@@ -271,6 +314,9 @@ def build_ui():
                             reload_rag     = gr.Button(L["btn_load"], size="sm")
                             unload_rag_btn = gr.Button(L["btn_unload"], size="sm")
                         reload_rag_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                        # See pending_gen_msg above — same stash-then-clear
+                        # pattern applied to RAG Chat's message box.
+                        pending_rag_msg = gr.State("")
                     with gr.Column(scale=7):
                         with gr.Accordion(L["accordion_chat"], open=False) as acc_rag_chat:
                             bot_rag   = gr.Chatbot(height=440)
@@ -367,15 +413,32 @@ def build_ui():
             data_analysis.reset_agent()
             return gr.update(value=msg, visible=True)
 
-        def do_chat_general(user_message, history, model_label, use_agentic, use_memory):
+        def stash_gen(user_message):
+            # Fires first, synchronously (queue=False) — clears msg_gen
+            # immediately and hands the message off to pending_gen_msg for
+            # the slow step below, instead of leaving it sitting in the
+            # textbox for however long the (possibly multi-minute) agent
+            # call takes. See module docstring: "INPUT-BOX CLEARING".
+            return "", user_message
+
+        def do_chat_general(pending_message, history, model_label, use_agentic, use_memory):
             # Wraps chat.chat_general() to also pop the conversation
             # accordion open the moment there's something to show — it
-            # starts collapsed on every page load.
-            history, cleared = chat.chat_general(user_message, history, model_label, use_agentic, use_memory)
-            return history, cleared, gr.update(open=True)
+            # starts collapsed on every page load. Reads the message from
+            # pending_gen_msg (stashed by stash_gen above), NOT from
+            # msg_gen itself, which has already been cleared by the time
+            # this runs.
+            history, _ = chat.chat_general(pending_message, history, model_label, use_agentic, use_memory)
+            return history, gr.update(open=True)
 
-        msg_gen.submit(do_chat_general, [msg_gen, bot_gen, model_dd_gen, gen_agentic_chk, gen_memory_chk], [bot_gen, msg_gen, acc_gen_chat])
-        send_gen.click(do_chat_general,  [msg_gen, bot_gen, model_dd_gen, gen_agentic_chk, gen_memory_chk], [bot_gen, msg_gen, acc_gen_chat])
+        msg_gen.submit(stash_gen, [msg_gen], [msg_gen, pending_gen_msg], queue=False).then(
+            do_chat_general, [pending_gen_msg, bot_gen, model_dd_gen, gen_agentic_chk, gen_memory_chk],
+            [bot_gen, acc_gen_chat]
+        )
+        send_gen.click(stash_gen, [msg_gen], [msg_gen, pending_gen_msg], queue=False).then(
+            do_chat_general, [pending_gen_msg, bot_gen, model_dd_gen, gen_agentic_chk, gen_memory_chk],
+            [bot_gen, acc_gen_chat]
+        )
 
         def clear_gen_fn():
             # Clearing the visible chat should also clear the agentic
@@ -416,12 +479,22 @@ def build_ui():
             data_analysis.reset_agent()
             return gr.update(value=msg, visible=True)
 
-        def do_chat_rag(user_message, history, model_label, use_agentic, use_memory):
-            history, cleared = chat.chat_rag(user_message, history, model_label, use_agentic, use_memory)
-            return history, cleared, gr.update(open=True)
+        def stash_rag(user_message):
+            # See stash_gen() above.
+            return "", user_message
 
-        msg_rag.submit(do_chat_rag, [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk, rag_memory_chk], [bot_rag, msg_rag, acc_rag_chat])
-        send_rag.click(do_chat_rag,  [msg_rag, bot_rag, model_dd_rag, rag_agentic_chk, rag_memory_chk], [bot_rag, msg_rag, acc_rag_chat])
+        def do_chat_rag(pending_message, history, model_label, use_agentic, use_memory):
+            history, _ = chat.chat_rag(pending_message, history, model_label, use_agentic, use_memory)
+            return history, gr.update(open=True)
+
+        msg_rag.submit(stash_rag, [msg_rag], [msg_rag, pending_rag_msg], queue=False).then(
+            do_chat_rag, [pending_rag_msg, bot_rag, model_dd_rag, rag_agentic_chk, rag_memory_chk],
+            [bot_rag, acc_rag_chat]
+        )
+        send_rag.click(stash_rag, [msg_rag], [msg_rag, pending_rag_msg], queue=False).then(
+            do_chat_rag, [pending_rag_msg, bot_rag, model_dd_rag, rag_agentic_chk, rag_memory_chk],
+            [bot_rag, acc_rag_chat]
+        )
 
         def clear_rag_fn():
             # See clear_gen_fn() above — also drops the agentic CodeAgent's
@@ -447,12 +520,22 @@ def build_ui():
         def unload_vlm_fn(lang_key):
             return gr.update(value=models.unload_vlm_fn(lang_key), visible=True)
 
-        def do_chat_vision(user_message, uploaded_image, history, vlm_label, use_visual_rag, use_memory):
-            history, img_reset = chat.chat_vision(user_message, uploaded_image, history, vlm_label, use_visual_rag, use_memory)
+        def stash_vis(user_message):
+            # See stash_gen() above.
+            return "", user_message
+
+        def do_chat_vision(pending_message, uploaded_image, history, vlm_label, use_visual_rag, use_memory):
+            history, img_reset = chat.chat_vision(pending_message, uploaded_image, history, vlm_label, use_visual_rag, use_memory)
             return history, img_reset, gr.update(open=True)
 
-        send_vis.click(do_chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk, vis_memory_chk], [bot_vis, img_upload, acc_vis_chat])
-        msg_vis.submit(do_chat_vision, [msg_vis, img_upload, bot_vis, vlm_dd, vis_rag_chk, vis_memory_chk], [bot_vis, img_upload, acc_vis_chat])
+        send_vis.click(stash_vis, [msg_vis], [msg_vis, pending_vis_msg], queue=False).then(
+            do_chat_vision, [pending_vis_msg, img_upload, bot_vis, vlm_dd, vis_rag_chk, vis_memory_chk],
+            [bot_vis, img_upload, acc_vis_chat]
+        )
+        msg_vis.submit(stash_vis, [msg_vis], [msg_vis, pending_vis_msg], queue=False).then(
+            do_chat_vision, [pending_vis_msg, img_upload, bot_vis, vlm_dd, vis_rag_chk, vis_memory_chk],
+            [bot_vis, img_upload, acc_vis_chat]
+        )
         clear_vis.click(lambda: ([], None, gr.update(open=False)), outputs=[bot_vis, img_upload, acc_vis_chat])
         load_vlm_btn.click(load_vlm_fn, [vlm_dd], [load_vlm_out])
         unload_vlm_btn.click(unload_vlm_fn, [lang_state], [load_vlm_out])
@@ -485,17 +568,26 @@ def build_ui():
             data_analysis.reset_agent()
             return gr.update(value="✅ Agent reset — will rebuild on next run.", visible=True)
 
-        def do_data_analysis(files, question, model_label, history, use_memory):
-            history, gallery, report_file = data_analysis.run_data_analysis(files, question, model_label, history, use_memory)
+        def stash_data(question):
+            # See stash_gen() above.
+            return "", question
+
+        def do_data_analysis(files, pending_question, model_label, history, use_memory):
+            history, gallery, report_file = data_analysis.run_data_analysis(files, pending_question, model_label, history, use_memory)
             # Reveal (expand) both the conversation and the results
             # accordions now that there's something in them — both stay
             # collapsed until an analysis actually runs.
-            return history, "", gallery, report_file, gr.update(open=True), gr.update(open=True)
+            return history, gallery, report_file, gr.update(open=True), gr.update(open=True)
 
-        send_data.click(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data, data_memory_chk],
-                        [bot_data, msg_data, data_gallery, data_report_file, acc_data_chat, acc_data_results])
-        msg_data.submit(do_data_analysis, [data_file_up, msg_data, model_dd_data, bot_data, data_memory_chk],
-                        [bot_data, msg_data, data_gallery, data_report_file, acc_data_chat, acc_data_results])
+        send_data.click(stash_data, [msg_data], [msg_data, pending_data_question], queue=False).then(
+            do_data_analysis, [data_file_up, pending_data_question, model_dd_data, bot_data, data_memory_chk],
+            [bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results]
+        )
+        msg_data.submit(stash_data, [msg_data], [msg_data, pending_data_question], queue=False).then(
+            do_data_analysis, [data_file_up, pending_data_question, model_dd_data, bot_data, data_memory_chk],
+            [bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results]
+        )
+
         def clear_data_fn():
             # See clear_gen_fn() above — also drops the Data Analysis
             # agent's own memory (RAM + persisted-to-disk copy) so a
