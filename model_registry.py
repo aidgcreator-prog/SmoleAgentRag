@@ -211,6 +211,12 @@ def get_max_steps_for_model(model_id: str, default_max_steps: int) -> int:
 
 QWEN3_IDS    = {"Qwen/Qwen3-0.6B", "Qwen/Qwen3-1.7B", "Qwen/Qwen3-4B",
                 "Qwen/Qwen3-8B", "Qwen/Qwen3-14B", "Qwen/Qwen3-32B"}
+# Qwen3.6 (April 2026) — hybrid linear-/full-attention MoE ("qwen3_5_moe")
+# and dense architectures, superseding Qwen3.5. Only ships in 27B (dense)
+# and 35B-A3B (MoE, ~3B active params/token) sizes — there is no small
+# (<20B) Qwen3.6 checkpoint, so BASE_MODEL_OPTIONS below still uses plain
+# Qwen3 for the 0.6B/1.7B/4B/8B/14B tiers, and only swaps in Qwen3.6 at
+# the top end (replacing the older Qwen3-32B).
 QWEN36_IDS   = {"Qwen/Qwen3.6-27B", "Qwen/Qwen3.6-35B-A3B"}
 ALL_QWEN_IDS = QWEN3_IDS | QWEN36_IDS
 QWEN_VL_IDS  = {"Qwen/Qwen2.5-VL-3B-Instruct", "Qwen/Qwen2.5-VL-7B-Instruct"}
@@ -249,10 +255,17 @@ BASE_MODEL_OPTIONS = {
     # Qwen3 dense sizes — same "qwen3" architecture as the existing
     # Qwen3-0.6B/1.7B/4B above, already covered by this app's pinned
     # transformers>=4.51.0 (see requirements.txt) — no new version guard
-    # needed, unlike Qwen3.6/Gemma 4 below.
+    # needed, unlike Qwen3.6/Gemma 4 below. No Qwen3.6 checkpoint exists
+    # at these sizes yet, so these stay on plain Qwen3.
     "🟠 Qwen3-8B     (~16 GB RAM | 8GB-VRAM tier)":  "Qwen/Qwen3-8B",
     "🔴 Qwen3-14B    (~30 GB RAM | 16GB-VRAM tier)": "Qwen/Qwen3-14B",
-    "🔴 Qwen3-32B    (~65 GB RAM | 24GB+/48GB+-VRAM tier)": "Qwen/Qwen3-32B",
+    # Qwen3.6 (April 2026, newest Qwen generation) — replaces the older
+    # Qwen3-32B at the top of the dense lineup, and adds the 35B-A3B MoE
+    # variant (only ~3B active params/token, so it stays fast even on
+    # CPU-only rigs — see README's hardware-tier table). Needs
+    # transformers>=5.2.0 — see models._MIN_TRANSFORMERS_VERSION["qwen36"].
+    "🔴 Qwen3.6-27B   (~55 GB RAM | 24GB+/48GB+-VRAM tier | needs transformers>=5.2.0)": "Qwen/Qwen3.6-27B",
+    "🔴 Qwen3.6-35B-A3B (~70 GB RAM, MoE ~3B active | fast even on CPU | needs transformers>=5.2.0)": "Qwen/Qwen3.6-35B-A3B",
     # Gemma 4 — needs transformers>=5.10.1 (see models._MIN_TRANSFORMERS_
     # VERSION["gemma4"] and model_registry.GEMMA4_IDS above); loading with
     # an older transformers raises a clear upgrade error instead of a
@@ -282,12 +295,12 @@ DEFAULT_LLM_LABEL = "🟢 Qwen3-0.6B   (~1.2 GB RAM | fastest)"
 # larger model. The embedding model is an invisible backend component and
 # the VLM is only loaded on-demand for image questions, so picking a
 # bigger one by default is low-surprise. The main chat LLM is different:
-# silently defaulting a capable machine to a 25-65GB model would mean a
+# silently defaulting a capable machine to a 25-70GB model would mean a
 # much longer first load with no explicit action from the user, and (for
-# the newly-registered Gemma 4 sizes) a version-guard error on any install
-# that hasn't upgraded transformers yet — bad first impression either way.
-# The larger recommended models above are fully selectable in the
-# dropdown; users on capable hardware can opt in deliberately.
+# the newly-registered Gemma 4 / Qwen3.6 sizes) a version-guard error on
+# any install that hasn't upgraded transformers yet — bad first impression
+# either way. The larger recommended models above are fully selectable in
+# the dropdown; users on capable hardware can opt in deliberately.
 DEFAULT_LLM_MODEL = MODEL_OPTIONS[DEFAULT_LLM_LABEL]
 
 

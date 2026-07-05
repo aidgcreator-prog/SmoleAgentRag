@@ -47,10 +47,10 @@ _MIN_TRANSFORMERS_VERSION = {
     # Qwen3.6 (dense Qwen3.6-27B, MoE Qwen3.6-35B-A3B) uses the "qwen3_5"
     # architecture — confirmed via community reports that transformers
     # <5.2.0 doesn't recognize it (same "config class not found" failure
-    # mode as Ornith above). Not currently wired into any HF dropdown —
-    # see model_registry.QWEN36_IDS — but guarded here defensively so
-    # loading it (if ever registered) fails with a clear upgrade message
-    # rather than a cryptic AutoModel crash, same as every other guard here.
+    # mode as Ornith above). Now wired into BASE_MODEL_OPTIONS (see
+    # model_registry.QWEN36_IDS) — loading it with an older transformers
+    # fails with a clear upgrade message rather than a cryptic AutoModel
+    # crash.
     "qwen36": "5.2.0",
     # Gemma 4 (E2B/E4B/12B/26B-A4B/31B) introduced the "gemma4" model type
     # in transformers 5.5.0 — confirmed directly via huggingface/transformers
@@ -194,13 +194,21 @@ def encode_texts(texts: list, normalize: bool = True):
 
 
 def get_chroma_collection(name: str = "rag_docs"):
+    # NOTE: deliberately no "[RAG] ChromaDB ready — N chunks indexed."
+    # print here anymore. This function is called from ui.py's
+    # demo.load(kb.get_index_stats, ...) right after the UI mounts (see
+    # ui.py's comment on why that's deferred rather than eager), so the
+    # line used to show up in the terminal on every single app startup —
+    # it did NOT mean an LLM/embedding model was being preloaded, only
+    # that the ChromaDB persistent client had opened. Removed as pure
+    # console noise; the same info is already visible in the UI's status
+    # bar (kb.get_index_stats()) without needing a terminal print.
     global _chroma_col
     if _chroma_col is None:
         import chromadb
         client      = chromadb.PersistentClient(path=mr.CHROMA_PERSIST_DIR)
         _chroma_col = client.get_or_create_collection(
             name=name, metadata={"hnsw:space": "cosine"})
-        print(f"[RAG] ChromaDB ready — {_chroma_col.count()} chunks indexed.")
     return _chroma_col
 
 
@@ -224,6 +232,13 @@ def get_llm(model_id: Optional[str] = None, n_ctx: Optional[int] = None):
     keep calling get_llm(model_id) exactly as before, and it'll keep using
     whatever context window was last chosen (via the UI's global "Context
     Window" control) without having to thread it through every call site.
+
+    NOTE: this function is only ever invoked on-demand — the first time a
+    chat tab is actually used, a "Load" button is clicked, or an agentic
+    tab builds its CodeAgent (see general_agent.py / rag_agent.py /
+    data_analysis.py). Nothing in app.py or ui.py calls this at startup,
+    so no LLM is loaded in advance; the app only pays the model-loading
+    cost the first time it's actually needed.
     """
     global _llm, _llm_model_id, _llm_n_ctx
     target = model_id or _llm_model_id
