@@ -58,6 +58,7 @@ import chat
 import data_analysis
 import deep_research_agent
 import general_agent
+import hardware
 import knowledge_base as kb
 import llama_backend
 import model_registry as mr
@@ -80,7 +81,30 @@ CSS = """
                 margin-left:6px; vertical-align:middle; }
 .tab-sidebar  { border-right:1px solid #444; padding-right:16px; margin-right:4px; }
 .sidebar-hd   { margin-top:0 !important; opacity:0.85; }
+.gpu-warning  { background:#3a2e0f; border:1px solid #a87c1f; border-radius:8px;
+                padding:10px 14px; margin-bottom:10px; font-size:0.88rem; line-height:1.5; }
 """
+
+
+def _gpu_warning_html(lang_key: str) -> str:
+    """Build the (possibly empty) GPU-incompatibility warning banner HTML.
+
+    Returns "" (nothing rendered) when the GPU is fine or there's no GPU
+    at all — see hardware._detect_gpu_kernel_incompatibility(). Only
+    non-empty when a CUDA GPU was detected but this PyTorch build has no
+    compiled kernels for it (e.g. an old Pascal-class card like an MX230
+    on a recent PyTorch release) — the exact case where the app silently
+    falls back to CPU and a non-technical user would otherwise have no
+    idea why, since torch.cuda.is_available() alone can't tell them.
+    """
+    info = hardware.get_gpu_incompatibility_info()
+    if not info:
+        return ""
+    l = LANGUAGES.get(lang_key, LANGUAGES["kh"])
+    msg = l["gpu_incompat_warning"].format(
+        gpu=info["gpu_name"], cc=info["compute_capability"], archs=info["supported_archs"]
+    )
+    return f'<div class="gpu-warning">{msg}</div>'
 
 
 def build_ui():
@@ -114,6 +138,14 @@ def build_ui():
                     choices=["Khmer", "English"], value="Khmer",
                     label="🌐 Language", scale=1
                 )
+
+        # ── GPU-incompatibility warning banner (hidden when there's ──
+        # nothing to warn about — see hardware.get_gpu_incompatibility_
+        # info()). Built once at UI-build time from whatever DEVICE was
+        # already resolved to at app-import time; updated on a language
+        # switch via switch_lang() below so it re-renders in the newly
+        # selected language instead of staying stuck in Khmer/English.
+        gpu_warning_html = gr.HTML(value=_gpu_warning_html("kh"))
 
         # ── GGUF model folder (optional, user-configurable) ─────────
         # No path is hardcoded — leave blank to skip GGUF entirely, or
@@ -732,6 +764,10 @@ def build_ui():
                 f'<div class="header-wrap"><span class="header-title">{l["title"]}</span>'
                 f'<span class="beta-badge">BETA</span></div>',
                 f'<div class="header-wrap"><span class="header-sub">{l["subtitle"].format(device=DEVICE.upper(), version=APP_VERSION)}</span></div>',
+                # GPU-incompatibility warning banner, re-rendered in the
+                # newly selected language (empty string if there's
+                # nothing to warn about — see _gpu_warning_html()).
+                _gpu_warning_html(lk),
                 # GGUF model folder
                 gr.update(label=l["label_gguf_dir"], placeholder=l["gguf_dir_placeholder"]),
                 gr.update(value=l["btn_scan_gguf"]),
@@ -834,7 +870,7 @@ def build_ui():
             )
 
         _lang_outputs = [
-            lang_state, header_title, header_sub,
+            lang_state, header_title, header_sub, gpu_warning_html,
             gguf_dir_tb, scan_gguf_btn, ctx_window_dd,
             # General Chat
             msg_gen, send_gen, clear_gen, acc_gen_chat, gen_settings_header, gen_desc, gen_agentic_chk, gen_memory_chk, model_dd_gen, reload_gen, unload_gen_btn,
