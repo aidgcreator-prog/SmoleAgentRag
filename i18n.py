@@ -118,7 +118,16 @@ LANGUAGES = {
         "err_answer": "💬 ចម្លើយ",
         "err_src_none": " | គ្មានឯកសារបញ្ចូលឡើយ",
         "err_src_list": " | ប្រភព: ",
-        "err_elapsed": "⏱ {elapsed:.1f}s | model: <code>{model}</code> ({dev})"
+        "err_elapsed": "⏱ {elapsed:.1f}s | model: <code>{model}</code> ({dev})",
+        "gpu_incompat_warning": (
+            "⚠️ <b>រកឃើញ GPU ប៉ុន្តែមិនអាចប្រើបានទេ</b>៖ '{gpu}' (compute capability {cc}) "
+            "ត្រូវបានរកឃើញ ប៉ុន្តែកំណែ PyTorch ដែលបានដំឡើងគ្មានកូដ kernel សម្រាប់ GPU នេះទេ "
+            "(វាគាំទ្រតែ compute capability: {archs})។ កម្មវិធីកំពុងដំណើរការនៅលើ <b>CPU</b> ជំនួសវិញ "
+            "(យឺតជាង ប៉ុន្តែនៅតែដំណើរការធម្មតា — មិនចាំបាច់ធ្វើអ្វីទាំងអស់)។ ប្រសិនបើអ្នកចង់ព្យាយាមប្រើ GPU "
+            "សូមដំណើរការ <code>SETUP.bat</code> ម្តងទៀត (វានឹងសាកល្បង build ថ្មីៗ ហើយត្រលប់ទៅ CPU វិញ "
+            "ដោយស្វ័យប្រវត្តិប្រសិនបើមិនដំណើរការ) — ប៉ុន្តែ GPU ចាស់ៗមួយចំនួន (ដូចជា GPU នេះ) "
+            "ប្រហែលជាលែងត្រូវបានគាំទ្រដោយ PyTorch កំណែថ្មីទាំងស្រុងទៀតហើយ។"
+        ),
     },
     "en": {
         "title": "🤖 Multipurpose AI Assistant",
@@ -230,6 +239,15 @@ LANGUAGES = {
         "err_answer": "💬 Answer",
         "err_src_none": " | no docs indexed",
         "err_src_list": " | sources: ",
-        "err_elapsed": "⏱ {elapsed:.1f}s | model: <code>{model}</code> ({dev})"
+        "err_elapsed": "⏱ {elapsed:.1f}s | model: <code>{model}</code> ({dev})",
+        "gpu_incompat_warning": (
+            "⚠️ <b>GPU detected but unusable</b>: '{gpu}' (compute capability {cc}) was found, "
+            "but the installed PyTorch build has no compiled kernels for it (it only supports "
+            "compute capability: {archs}). The app is running on <b>CPU</b> instead (slower, but "
+            "fully functional — no action needed). If you'd like to try enabling the GPU, re-run "
+            "<code>SETUP.bat</code> (it probes newer builds and automatically falls back to CPU "
+            "again if none work) — but some older GPUs (like this one) may no longer be supported "
+            "by any current PyTorch release at all."
+        ),
     }
 }

@@ -1,4 +1,4 @@
-﻿$OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try { $Host.UI.RawUI.WindowTitle = "ជំនួយការ AI ពហុមុខងារ - ការដំឡើង" } catch {}
 
@@ -146,6 +146,15 @@ $torchIndex = "https://download.pytorch.org/whl/cpu"
 
 $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
 $gpuDone = $false
+# Compute capability of GPU 0 (e.g. "6.1" for a Pascal-class card like an
+# MX230, "8.6" for an RTX 30-series, etc). Queried directly from
+# nvidia-smi — works without torch installed yet — used purely for an
+# informative log line here; the REAL compatibility decision is made by
+# actually running a CUDA kernel after installing torch (see the
+# Test-TorchCudaReal smoke test in STEP 5 below), since PyTorch's
+# supported-architecture list changes between releases and hardcoding a
+# "CC >= X is fine" cutoff here would silently go stale.
+$computeCap = $null
 
 if ($nvidiaSmi) {
     $smiOut = & nvidia-smi 2>$null
@@ -158,28 +167,56 @@ if ($nvidiaSmi) {
                 $rawCuda = $matches[1]
             }
         }
-        Write-Host "[OK] រកឃើញ GPU NVIDIA ។ កំណែ CUDA Driver: $rawCuda" -ForegroundColor Green
+        try {
+            $ccOut = & nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>$null
+            if ($LASTEXITCODE -eq 0 -and $ccOut) {
+                $computeCap = ($ccOut -split "`r?`n")[0].Trim()
+            }
+        } catch {}
 
+        $gpuNameOut = $null
+        try {
+            $gpuNameOut = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1)
+        } catch {}
+
+        Write-Host "[OK] រកឃើញ GPU NVIDIA: $gpuNameOut | កំណែ CUDA Driver: $rawCuda | Compute Capability: $computeCap" -ForegroundColor Green
+
+        # Driver CUDA version -> PyTorch wheel tier. NVIDIA drivers are
+        # backward-compatible with older CUDA toolkits, so a driver
+        # reporting a NEWER major CUDA version than any known PyTorch
+        # wheel tier (e.g. CUDA 13.x, as shipped by newer drivers even on
+        # old GPUs) is intentionally mapped to the newest known-good tier
+        # rather than treated as an "unknown version" error — the driver
+        # being new does NOT mean the GPU itself is new/supported; that's
+        # exactly what the real-kernel smoke test after install (STEP 5
+        # below) exists to verify, since guessing from the driver version
+        # alone (as this script previously did) is exactly what let an
+        # old Pascal-class GPU silently get a "cu128 is probably fine"
+        # verdict that then crashed on first real use.
         if ($rawCuda) {
-            $cmajor = $rawCuda.Split(".")[0]
+            $cmajor = [int]($rawCuda.Split(".")[0])
             $cfull = $rawCuda
-            if ($cmajor -eq "11") {
+            if ($cmajor -eq 11) {
                 $cudaVersion = "cu118"
-            } elseif ($cfull -match "^12\.(1|2|3)") {
-                $cudaVersion = "cu121"
-            } elseif ($cfull -match "^12\.(4|5|6)") {
-                $cudaVersion = "cu124"
-            } elseif ($cfull -match "^12\.(7|8|9)") {
+            } elseif ($cmajor -eq 12) {
+                if ($cfull -match "^12\.(1|2|3)") {
+                    $cudaVersion = "cu121"
+                } elseif ($cfull -match "^12\.(4|5|6)") {
+                    $cudaVersion = "cu124"
+                } else {
+                    $cudaVersion = "cu128"
+                }
+            } elseif ($cmajor -ge 13) {
+                Write-Host "[ចំណាំ] Driver CUDA version ($rawCuda) ថ្មីជាង wheel tier ដែលស្គាល់ - កំពុងប្រើ cu128 (tier ថ្មីបំផុត)។ driver ថ្មីមិនមានន័យថា GPU ត្រូវបានគាំទ្រដោយ PyTorch ថ្មីៗនោះទេ - ការសាកល្បងផ្ទុកគំរូខាងក្រោមនឹងផ្ទៀងផ្ទាត់រឿងនេះឱ្យប្រាកដ។" -ForegroundColor Cyan
                 $cudaVersion = "cu128"
             } else {
-                Write-Host "[ព្រមាន] កំណែ CUDA មិនស្គាល់ '$rawCuda' - កំពុងប្រើលំនាំដើម cu128 ។" -ForegroundColor Yellow
                 $cudaVersion = "cu128"
             }
         } else {
             $cudaVersion = "cu128"
         }
         $torchIndex = "https://download.pytorch.org/whl/$cudaVersion"
-        Write-Host "[OK] នឹងដំឡើង PyTorch សម្រាប់ CUDA $cudaVersion" -ForegroundColor Green
+        Write-Host "[OK] នឹងដំឡើង PyTorch សម្រាប់ CUDA $cudaVersion (នឹងផ្ទៀងផ្ទាត់ដោយផ្ទុកគំរូ kernel ពិតប្រាកដនៅជំហានបន្ទាប់)" -ForegroundColor Green
         $gpuDone = $true
     }
 }
@@ -248,6 +285,67 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 Write-Host "[OK] PyTorch ត្រូវបានដំឡើង ($cudaVersion) ។" -ForegroundColor Green
+
+# ── STEP 5b: Verify the GPU wheel ACTUALLY works on THIS machine ─────
+# `pip install` succeeding, and even `torch.cuda.is_available()`
+# returning True, do NOT guarantee this specific PyTorch build ships
+# compiled kernels for this specific GPU's compute capability. PyTorch
+# wheels only include kernels for a fixed list of architectures, and
+# older cards (e.g. Pascal/sm_6x such as the GeForce MX series, or
+# Maxwell/sm_5x) have been dropped from recent stable releases. When
+# that happens, the model still LOADS onto the device with no error —
+# it only crashes the first time a real kernel launches (e.g. deep
+# inside a model's tie_weights() step), with a confusing
+# "CUDA error: no kernel image is available for execution on the
+# device". A driver reporting a new CUDA version (e.g. CUDA 13.x) does
+# NOT mean the GPU itself is new/supported — this is exactly the gap
+# that let an old GPU silently receive a "should be fine" verdict.
+#
+# So: actually launch a real kernel here (mirrors the same
+# Test-LlamaCppRealModelLoad pattern already used for llama-cpp-python
+# below) and, if it fails, automatically fall back to the CPU-only
+# wheel instead of leaving a broken GPU install in place for a
+# non-technical end user to stumble into later at runtime.
+function Test-TorchCudaReal([int]$TimeoutSec = 90) {
+    $code = "import torch; x = torch.randn(64, 64, device='cuda'); y = x @ x; torch.cuda.synchronize(); print('OK')"
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = "python"
+    $psi.Arguments              = "-c `"$code`""
+    $psi.UseShellExecute        = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    try {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+    } catch {
+        return $false
+    }
+    $finished = $proc.WaitForExit($TimeoutSec * 1000)
+    if (-not $finished) {
+        try { $proc.Kill() } catch {}
+        return $false
+    }
+    return ($proc.ExitCode -eq 0)
+}
+
+if ($cudaVersion -ne "cpu") {
+    Write-Host ""
+    Write-Host " កំពុងផ្ទៀងផ្ទាត់ថា GPU នេះពិតជាដំណើរការជាមួយ PyTorch build ដែលបានដំឡើង (real kernel test)..."
+    if (Test-TorchCudaReal) {
+        Write-Host "[OK] GPU kernel test ជោគជ័យ — PyTorch នឹងប្រើ GPU របស់អ្នកបាន។" -ForegroundColor Green
+    } else {
+        Write-Host "[ព្រមាន] GPU wheel ដំឡើងបានជោគជ័យ ប៉ុន្តែ GPU នេះ (Compute Capability: $computeCap) មិនត្រូវបានគាំទ្រដោយ PyTorch build នេះទេ (ប្រហែលជាចាស់ពេក ឬថ្មីពេក)។ កំពុងត្រលប់ទៅ CPU-only wheel វិញ ដោយស្វ័យប្រវត្តិ..." -ForegroundColor Yellow
+        & python -m pip uninstall torch torchvision torchaudio -y --quiet 2>$null
+        & python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --quiet
+        if ($LASTEXITCODE -eq 0) {
+            $cudaVersion = "cpu"
+            $torchIndex  = "https://download.pytorch.org/whl/cpu"
+            Write-Host "[OK] កម្មវិធីនឹងដំណើរការនៅលើ CPU ជំនួសវិញ (GPU នេះមិនត្រូវបានគាំទ្រដោយ PyTorch កំណែថ្មីនេះទេ)។" -ForegroundColor Yellow
+            Write-Host "     ចំណាំ៖ កម្មវិធីខ្លួនឯងក៏នឹងបង្ហាញការព្រមានស្រដៀងគ្នានេះនៅក្នុង UI ជានិច្ចផងដែរ។" -ForegroundColor Yellow
+        } else {
+            Write-Host "[កំហុស] ការត្រលប់ទៅ CPU wheel ក៏បានបរាជ័យដែរ។ សូមដំណើរការ SETUP.bat ម្តងទៀត ឬដំឡើងដោយដៃ។" -ForegroundColor Red
+        }
+    }
+}
 
 # ── STEP 6: Install llama-cpp-python (GGUF backend), hardware-aware ──
 Write-Host ""
@@ -506,6 +604,17 @@ if ($llamaCppInstalled) {
     Write-Host "[OK] llama-cpp-python (GGUF): ដំណើរការក្នុងម៉ូដ '$llamaCppMode' ។" -ForegroundColor Green
 } else {
     Write-Host "[ព្រមាន] llama-cpp-python (GGUF): មិនអាចដំឡើងបានទេ - ម៉ូដែល .gguf នឹងមិនអាចប្រើបានទេ។" -ForegroundColor Yellow
+}
+
+# PyTorch's final, VERIFIED status — reflects the real-kernel smoke test
+# in STEP 5b above, not just whether `pip install` exit-coded 0. If the
+# GPU wheel failed the real test, $cudaVersion was already reset to
+# "cpu" there, so this always reflects what will ACTUALLY run at app
+# launch, not an optimistic guess based on driver version alone.
+if ($cudaVersion -eq "cpu") {
+    Write-Host "[ចំណាំ] PyTorch: កំពុងប្រើ CPU (មិនប្រើ GPU) ។ កម្មវិធីនឹងបង្ហាញព័ត៌មានលម្អិតនៅក្នុង UI ប្រសិនបើ GPU មួយត្រូវបានរកឃើញ ប៉ុន្តែមិនត្រូវបានគាំទ្រ។" -ForegroundColor Yellow
+} else {
+    Write-Host "[OK] PyTorch: បានផ្ទៀងផ្ទាត់ថា GPU ដំណើរការជាមួយ wheel '$cudaVersion' ។" -ForegroundColor Green
 }
 
 # ── Done ───────────────────────────────────────────────────────────

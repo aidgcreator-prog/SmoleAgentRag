@@ -8,6 +8,7 @@ import sys
 from typing import Optional
 
 import torch
+import warnings
 
 
 class HardwareManager:
@@ -211,13 +212,113 @@ class HardwareManager:
             yield f"❌ Error: {str(e)}", "cpu", f"❌ Error: {str(e)}"
 
 
+# ──────────────────────────────────────────────────────────────────
+# Real GPU/PyTorch kernel-compatibility check
+# ──────────────────────────────────────────────────────────────────
+# `torch.cuda.is_available()` only checks that the CUDA *driver* and
+# runtime can be initialized — it does NOT mean this specific PyTorch
+# build actually ships compiled kernels for this specific GPU's compute
+# capability. PyTorch wheels only include kernels ("sm_XX" binaries) for
+# a fixed list of architectures; older cards (e.g. Pascal/sm_6x,
+# Maxwell/sm_5x) have been dropped from recent stable releases even
+# though `torch.cuda.is_available()` still happily reports True and the
+# model even *loads* onto the device — it only blows up the moment a
+# real CUDA kernel is launched (e.g. during model loading's
+# tie_weights()), with "CUDA error: no kernel image is available for
+# execution on the device".
+#
+# This is exactly the gap that let a machine with e.g. an NVIDIA GeForce
+# MX230 (compute capability 6.1) silently get a "cuda-capable" verdict
+# from is_available(), install a GPU build via SETUP.ps1, and then crash
+# on first real use. SETUP.ps1 now does a real-kernel smoke test right
+# after installing torch (mirroring the same pattern already used there
+# for llama-cpp-python) and falls back to a CPU wheel automatically if it
+# fails — but a user could still end up here via a manual `pip install
+# torch` re-install, a different Python environment, a driver/GPU swap,
+# etc. So this same check is repeated here at app-import time as a
+# runtime safety net: DEVICE only resolves to "cuda" if a real kernel
+# actually runs successfully, not just because is_available() said so.
+# ──────────────────────────────────────────────────────────────────
+def _detect_gpu_kernel_incompatibility() -> Optional[dict]:
+    """Best-effort: if a CUDA GPU is visible but this torch build has no
+    compiled kernels for its compute capability, return a small dict with
+    enough detail for the UI to build a clear, actionable warning
+    (gpu_name, compute capability, and the archs this torch build DOES
+    support). Returns None if the GPU is fully usable (or there's no GPU
+    at all — that's a normal CPU-only setup, not a warning-worthy state).
+    """
+    if not torch.cuda.is_available():
+        return None
+    try:
+        gpu_name = torch.cuda.get_device_name(0)
+        cc_major, cc_minor = torch.cuda.get_device_capability(0)
+        cc_str = f"{cc_major}.{cc_minor}"
+        try:
+            arch_list = torch.cuda.get_arch_list()
+        except Exception:
+            arch_list = []
+        archs_str = ", ".join(a.replace("sm_", "") for a in arch_list) if arch_list else "unknown"
+
+        # The real test: actually launch a kernel, not just check
+        # is_available(). Wrapped so a torch UserWarning about the CC
+        # mismatch (torch itself often prints one on this exact call)
+        # doesn't spam the console a second time here — SETUP.ps1 /
+        # the terminal already shows torch's own version of this warning;
+        # this function only needs the pass/fail result.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                x = torch.randn(8, device="cuda")
+                _ = x @ x
+                torch.cuda.synchronize()
+                kernel_ok = True
+            except Exception:
+                kernel_ok = False
+
+        if kernel_ok:
+            return None
+
+        return {
+            "gpu_name": gpu_name,
+            "compute_capability": cc_str,
+            "supported_archs": archs_str,
+        }
+    except Exception:
+        # Detection itself failing shouldn't block startup or produce a
+        # false warning — treat as "couldn't determine", not "broken".
+        return None
+
+
 # ── Resolved once at import time ────────────────────────────────────
-if torch.cuda.is_available():
+_GPU_INCOMPATIBILITY_INFO = _detect_gpu_kernel_incompatibility()
+
+if torch.cuda.is_available() and _GPU_INCOMPATIBILITY_INFO is None:
     DEVICE = "cuda"
 elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     DEVICE = "mps"
 else:
     DEVICE = "cpu"
+    if _GPU_INCOMPATIBILITY_INFO is not None:
+        print(
+            f"[Hardware] WARNING: GPU '{_GPU_INCOMPATIBILITY_INFO['gpu_name']}' "
+            f"(compute capability {_GPU_INCOMPATIBILITY_INFO['compute_capability']}) "
+            f"was detected, but this PyTorch build has no compiled kernels for it "
+            f"(supports: {_GPU_INCOMPATIBILITY_INFO['supported_archs']}). "
+            f"Falling back to CPU — see the warning banner in the UI for how to fix this."
+        )
+
+
+def get_gpu_incompatibility_info() -> Optional[dict]:
+    """Read-only accessor for ui.py: returns the dict built at import time
+    (see _detect_gpu_kernel_incompatibility() above) describing a
+    detected-but-unusable GPU, or None if the GPU is fine / there's no
+    GPU. Used to render a one-time warning banner in the UI so a
+    non-technical user isn't left guessing why everything is "running on
+    CPU" despite clearly having an NVIDIA card — the banner explains it
+    and points at the fix.
+    """
+    return _GPU_INCOMPATIBILITY_INFO
+
 
 TORCH_DTYPE = torch.float16 if DEVICE != "cpu" else torch.float32
 
@@ -226,7 +327,13 @@ def refresh_system_ui():
     status = HardwareManager.get_system_status()
     return (
         "🔄 Status Refreshed",
-        status["current_device"].upper(),
+        # Report the DEVICE this app is ACTUALLY using (resolved once at
+        # import time above, already accounting for the real-kernel
+        # compatibility check) rather than status["current_device"], which
+        # only reflects torch.cuda.is_available() and would misleadingly
+        # say "CUDA" even on a machine that silently fell back to CPU due
+        # to a GPU/PyTorch-build compute-capability mismatch.
+        DEVICE.upper(),
         status["cuda_version"] or "N/A",
         "✅ Yes" if status["torch_cuda_available"] else "❌ No",
         ""  # Clear logs
