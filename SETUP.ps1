@@ -545,6 +545,7 @@ Write-Host "      អាចចំណាយពេលច្រើននាទី..
 Write-Host " កំពុងដំឡើង packages ស្នូល..."
 & python -m pip install `
     "smolagents[transformers]>=1.8.0" `
+    "ddgs>=9.0.0" `
     "chromadb>=0.5.0" `
     "sentence-transformers>=3.0.0" `
     "FlagEmbedding>=1.2.0" `
@@ -582,7 +583,7 @@ Write-Host ""
 
 if ($coreExit -ne 0) {
     Write-Host "[ព្រមាន] Package មួយចំនួនអាចនឹងបានបរាជ័យ។ កំពុងព្យាយាមម្តងទៀតម្តងមួយៗ..." -ForegroundColor Yellow
-    $pkgs = @("smolagents[transformers]", "chromadb", "sentence-transformers", "transformers>=4.51.0", "accelerate", "bitsandbytes", "PyMuPDF", "datasets", "gradio")
+    $pkgs = @("smolagents[transformers]", "ddgs>=9.0.0", "chromadb", "sentence-transformers", "transformers>=4.51.0", "accelerate", "bitsandbytes", "PyMuPDF", "datasets", "gradio")
     foreach ($p in $pkgs) {
         Write-Host " កំពុងដំឡើង $p..."
         & python -m pip install $p --quiet
