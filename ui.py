@@ -1,4 +1,4 @@
-﻿"""
+"""
 ui.py — Builds the Gradio Blocks UI and wires every event handler.
 
 Layout convention used on every tab that has settings: the primary input
@@ -209,6 +209,12 @@ def build_ui():
                         with gr.Row():
                             msg_gen  = gr.Textbox(placeholder=L["placeholder_gen"], show_label=False, scale=8)
                             send_gen = gr.Button(L["btn_send"], variant="primary", scale=1)
+                        # Status indicator — hidden until a message is sent,
+                        # then shows "thinking" text immediately (before the
+                        # potentially slow LLM/agent call even starts) so the
+                        # UI never looks frozen. See show_thinking_gen() /
+                        # do_chat_general() below.
+                        status_gen = gr.Markdown(visible=False)
 
             # ── Tab 2: Vision Chat ────────────────────────────────
             with gr.Tab(L["tab_vision"]) as tab_vis:
@@ -243,6 +249,8 @@ def build_ui():
                             msg_vis    = gr.Textbox(placeholder=L["placeholder_vis"], show_label=False, scale=6)
                             img_upload = gr.Image(type="pil", sources=["upload", "clipboard"], scale=2)
                             send_vis   = gr.Button(L["btn_send"], variant="primary", scale=1)
+                        # See status_gen above.
+                        status_vis = gr.Markdown(visible=False)
 
             # ── Tab 3: Speech to Text ─────────────────────────────
             with gr.Tab(L["tab_stt"]) as tab_stt:
@@ -298,6 +306,8 @@ def build_ui():
                         with gr.Row():
                             msg_data  = gr.Textbox(placeholder=L["placeholder_data"], show_label=False, scale=8)
                             send_data = gr.Button(L["btn_send"], variant="primary", scale=1)
+                        # See status_gen above.
+                        status_data = gr.Markdown(visible=False)
 
             # ── Tab 5: Knowledge Base ─────────────────────────────
             # No "⚙️ Settings" equivalent here — kept as a single column.
@@ -373,6 +383,8 @@ def build_ui():
                         with gr.Row():
                             msg_rag  = gr.Textbox(placeholder=L["placeholder_rag"], show_label=False, scale=8)
                             send_rag = gr.Button(L["btn_send"], variant="primary", scale=1)
+                        # See status_gen above.
+                        status_rag = gr.Markdown(visible=False)
 
             # ── Tab 8: Deep Research (manager + web-search sub-agent — ──
             # see deep_research_agent.py) ─────────────────────────────
@@ -408,6 +420,8 @@ def build_ui():
                         with gr.Row():
                             msg_dr  = gr.Textbox(placeholder=L["placeholder_deep_research"], show_label=False, scale=8)
                             send_dr = gr.Button(L["btn_send"], variant="primary", scale=1)
+                        # See status_gen above.
+                        status_dr = gr.Markdown(visible=False)
 
             # ── Tab 9: About ──────────────────────────────────────
             with gr.Tab(L["tab_about"]) as tab_about:
@@ -493,23 +507,41 @@ def build_ui():
             # call takes. See module docstring: "INPUT-BOX CLEARING".
             return "", user_message
 
+        def show_thinking_gen(use_agentic):
+            # Fires second, also synchronously (queue=False) — shows an
+            # immediate "something is happening" status line the instant
+            # Send is pressed, rather than leaving the UI looking frozen/
+            # unresponsive for however long the LLM/agent call underneath
+            # takes (agentic runs especially — see general_agent.py's
+            # module docstring, this can be minutes with a slow local
+            # model). Cleared again by do_chat_general() once the real
+            # answer is ready.
+            msg = ("🌐🤖 Thinking… the agent may search the web or read pages before answering."
+                   if use_agentic else "🤖 Thinking…")
+            return gr.update(value=msg, visible=True)
+
         def do_chat_general(pending_message, history, model_label, use_agentic, use_memory):
             # Wraps chat.chat_general() to also pop the conversation
             # accordion open the moment there's something to show — it
             # starts collapsed on every page load. Reads the message from
             # pending_gen_msg (stashed by stash_gen above), NOT from
             # msg_gen itself, which has already been cleared by the time
-            # this runs.
+            # this runs. Also hides the "thinking" status line shown by
+            # show_thinking_gen() above, now that the real answer is in.
             history, _ = chat.chat_general(pending_message, history, model_label, use_agentic, use_memory)
-            return history, gr.update(open=True)
+            return history, gr.update(open=True), gr.update(visible=False)
 
         msg_gen.submit(stash_gen, [msg_gen], [msg_gen, pending_gen_msg], queue=False).then(
+            show_thinking_gen, [gen_agentic_chk], [status_gen], queue=False
+        ).then(
             do_chat_general, [pending_gen_msg, bot_gen, model_dd_gen, gen_agentic_chk, gen_memory_chk],
-            [bot_gen, acc_gen_chat]
+            [bot_gen, acc_gen_chat, status_gen]
         )
         send_gen.click(stash_gen, [msg_gen], [msg_gen, pending_gen_msg], queue=False).then(
+            show_thinking_gen, [gen_agentic_chk], [status_gen], queue=False
+        ).then(
             do_chat_general, [pending_gen_msg, bot_gen, model_dd_gen, gen_agentic_chk, gen_memory_chk],
-            [bot_gen, acc_gen_chat]
+            [bot_gen, acc_gen_chat, status_gen]
         )
 
         def clear_gen_fn():
@@ -523,9 +555,9 @@ def build_ui():
             # longer persists memory to disk that would need clearing
             # separately here).
             general_agent.reset_agent()
-            return [], "", gr.update(open=False)
+            return [], "", gr.update(open=False), gr.update(visible=False)
 
-        clear_gen.click(clear_gen_fn, outputs=[bot_gen, msg_gen, acc_gen_chat])
+        clear_gen.click(clear_gen_fn, outputs=[bot_gen, msg_gen, acc_gen_chat, status_gen])
         reload_gen.click(reload_gen_fn, [model_dd_gen], [reload_gen_out])
         unload_gen_btn.click(unload_gen_fn, [lang_state], [reload_gen_out])
 
@@ -554,26 +586,36 @@ def build_ui():
             # See stash_gen() above.
             return "", user_message
 
+        def show_thinking_rag(use_agentic):
+            # See show_thinking_gen() above.
+            msg = ("📚🤖 Searching the knowledge base and thinking…"
+                   if use_agentic else "📚 Retrieving context and thinking…")
+            return gr.update(value=msg, visible=True)
+
         def do_chat_rag(pending_message, history, model_label, use_agentic, use_memory):
             history, _ = chat.chat_rag(pending_message, history, model_label, use_agentic, use_memory)
-            return history, gr.update(open=True)
+            return history, gr.update(open=True), gr.update(visible=False)
 
         msg_rag.submit(stash_rag, [msg_rag], [msg_rag, pending_rag_msg], queue=False).then(
+            show_thinking_rag, [rag_agentic_chk], [status_rag], queue=False
+        ).then(
             do_chat_rag, [pending_rag_msg, bot_rag, model_dd_rag, rag_agentic_chk, rag_memory_chk],
-            [bot_rag, acc_rag_chat]
+            [bot_rag, acc_rag_chat, status_rag]
         )
         send_rag.click(stash_rag, [msg_rag], [msg_rag, pending_rag_msg], queue=False).then(
+            show_thinking_rag, [rag_agentic_chk], [status_rag], queue=False
+        ).then(
             do_chat_rag, [pending_rag_msg, bot_rag, model_dd_rag, rag_agentic_chk, rag_memory_chk],
-            [bot_rag, acc_rag_chat]
+            [bot_rag, acc_rag_chat, status_rag]
         )
 
         def clear_rag_fn():
             # See clear_gen_fn() above — dropping the cached CodeAgent is
             # enough to guarantee a fresh, empty-memory agent next build.
             rag_agent.reset_agent()
-            return [], "", gr.update(open=False)
+            return [], "", gr.update(open=False), gr.update(visible=False)
 
-        clear_rag.click(clear_rag_fn, outputs=[bot_rag, msg_rag, acc_rag_chat])
+        clear_rag.click(clear_rag_fn, outputs=[bot_rag, msg_rag, acc_rag_chat, status_rag])
         reload_rag.click(reload_rag_fn, [model_dd_rag], [reload_rag_out])
         unload_rag_btn.click(unload_rag_fn, [lang_state], [reload_rag_out])
 
@@ -600,17 +642,32 @@ def build_ui():
             # See stash_gen() above.
             return "", user_message
 
+        def show_thinking_dr():
+            # See show_thinking_gen() above. Deep Research is the
+            # slowest tab (manager + sub-agent, periodic re-planning —
+            # see deep_research_agent.py), so the message sets that
+            # expectation explicitly.
+            return gr.update(
+                value="🔬🤖 Researching… breaking your question into sub-questions, "
+                      "searching, and re-planning as needed. This can take several minutes.",
+                visible=True,
+            )
+
         def do_chat_deep_research(pending_message, history, model_label, use_memory):
             history, _ = chat.chat_deep_research(pending_message, history, model_label, use_memory)
-            return history, gr.update(open=True)
+            return history, gr.update(open=True), gr.update(visible=False)
 
         msg_dr.submit(stash_dr, [msg_dr], [msg_dr, pending_dr_msg], queue=False).then(
+            show_thinking_dr, None, [status_dr], queue=False
+        ).then(
             do_chat_deep_research, [pending_dr_msg, bot_dr, model_dd_dr, dr_memory_chk],
-            [bot_dr, acc_dr_chat]
+            [bot_dr, acc_dr_chat, status_dr]
         )
         send_dr.click(stash_dr, [msg_dr], [msg_dr, pending_dr_msg], queue=False).then(
+            show_thinking_dr, None, [status_dr], queue=False
+        ).then(
             do_chat_deep_research, [pending_dr_msg, bot_dr, model_dd_dr, dr_memory_chk],
-            [bot_dr, acc_dr_chat]
+            [bot_dr, acc_dr_chat, status_dr]
         )
 
         def clear_dr_fn():
@@ -618,9 +675,9 @@ def build_ui():
             # (and its search sub-agent) is enough to guarantee a fresh,
             # empty-memory agent next build.
             deep_research_agent.reset_agent()
-            return [], "", gr.update(open=False)
+            return [], "", gr.update(open=False), gr.update(visible=False)
 
-        clear_dr.click(clear_dr_fn, outputs=[bot_dr, msg_dr, acc_dr_chat])
+        clear_dr.click(clear_dr_fn, outputs=[bot_dr, msg_dr, acc_dr_chat, status_dr])
         reload_dr.click(reload_dr_fn, [model_dd_dr], [reload_dr_out])
         unload_dr_btn.click(unload_dr_fn, [lang_state], [reload_dr_out])
         reset_dr_btn.click(reset_dr_agent_fn, outputs=[reset_dr_out])
@@ -641,19 +698,30 @@ def build_ui():
             # See stash_gen() above.
             return "", user_message
 
+        def show_thinking_vis(use_visual_rag):
+            # See show_thinking_gen() above.
+            msg = ("🖼️🔍 Analyzing the image (and visual index) and thinking…"
+                   if use_visual_rag else "🖼️ Analyzing the image and thinking…")
+            return gr.update(value=msg, visible=True)
+
         def do_chat_vision(pending_message, uploaded_image, history, vlm_label, use_visual_rag, use_memory):
             history, img_reset = chat.chat_vision(pending_message, uploaded_image, history, vlm_label, use_visual_rag, use_memory)
-            return history, img_reset, gr.update(open=True)
+            return history, img_reset, gr.update(open=True), gr.update(visible=False)
 
         send_vis.click(stash_vis, [msg_vis], [msg_vis, pending_vis_msg], queue=False).then(
+            show_thinking_vis, [vis_rag_chk], [status_vis], queue=False
+        ).then(
             do_chat_vision, [pending_vis_msg, img_upload, bot_vis, vlm_dd, vis_rag_chk, vis_memory_chk],
-            [bot_vis, img_upload, acc_vis_chat]
+            [bot_vis, img_upload, acc_vis_chat, status_vis]
         )
         msg_vis.submit(stash_vis, [msg_vis], [msg_vis, pending_vis_msg], queue=False).then(
+            show_thinking_vis, [vis_rag_chk], [status_vis], queue=False
+        ).then(
             do_chat_vision, [pending_vis_msg, img_upload, bot_vis, vlm_dd, vis_rag_chk, vis_memory_chk],
-            [bot_vis, img_upload, acc_vis_chat]
+            [bot_vis, img_upload, acc_vis_chat, status_vis]
         )
-        clear_vis.click(lambda: ([], None, gr.update(open=False)), outputs=[bot_vis, img_upload, acc_vis_chat])
+        clear_vis.click(lambda: ([], None, gr.update(open=False), gr.update(visible=False)),
+                        outputs=[bot_vis, img_upload, acc_vis_chat, status_vis])
         load_vlm_btn.click(load_vlm_fn, [vlm_dd], [load_vlm_out])
         unload_vlm_btn.click(unload_vlm_fn, [lang_state], [load_vlm_out])
 
@@ -689,20 +757,37 @@ def build_ui():
             # See stash_gen() above.
             return "", question
 
+        def show_thinking_data():
+            # See show_thinking_gen() above. Data Analysis runs a full EDA
+            # (load, chart, correlate, write a report — see
+            # data_analysis.py's task prompt), so it's typically the
+            # longest-running single call in the app; the message sets
+            # that expectation explicitly.
+            return gr.update(
+                value="📊🤖 Analyzing your data, building charts, and writing the report… "
+                      "this can take a few minutes.",
+                visible=True,
+            )
+
         def do_data_analysis(files, pending_question, model_label, history, use_memory):
             history, gallery, report_file = data_analysis.run_data_analysis(files, pending_question, model_label, history, use_memory)
             # Reveal (expand) both the conversation and the results
             # accordions now that there's something in them — both stay
-            # collapsed until an analysis actually runs.
-            return history, gallery, report_file, gr.update(open=True), gr.update(open=True)
+            # collapsed until an analysis actually runs. Also hides the
+            # "thinking" status line shown by show_thinking_data() above.
+            return history, gallery, report_file, gr.update(open=True), gr.update(open=True), gr.update(visible=False)
 
         send_data.click(stash_data, [msg_data], [msg_data, pending_data_question], queue=False).then(
+            show_thinking_data, None, [status_data], queue=False
+        ).then(
             do_data_analysis, [data_file_up, pending_data_question, model_dd_data, bot_data, data_memory_chk],
-            [bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results]
+            [bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results, status_data]
         )
         msg_data.submit(stash_data, [msg_data], [msg_data, pending_data_question], queue=False).then(
+            show_thinking_data, None, [status_data], queue=False
+        ).then(
             do_data_analysis, [data_file_up, pending_data_question, model_dd_data, bot_data, data_memory_chk],
-            [bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results]
+            [bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results, status_data]
         )
 
         def clear_data_fn():
@@ -712,10 +797,10 @@ def build_ui():
             # reset it should otherwise trigger.
             data_analysis.reset_agent()
             data_analysis._last_data_context["key"] = None
-            return [], None, None, gr.update(open=False), gr.update(open=False)
+            return [], None, None, gr.update(open=False), gr.update(open=False), gr.update(visible=False)
 
         clear_data.click(clear_data_fn,
-                         outputs=[bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results])
+                         outputs=[bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results, status_data])
         reset_data_btn.click(reset_data_agent_fn, outputs=[reset_data_out])
 
         # Knowledge Base
@@ -870,6 +955,9 @@ def build_ui():
                 # Status bars (Knowledge Base tab + RAG Chat tab)
                 kb.get_index_stats(lk),
                 kb.get_index_stats(lk),
+                # Status indicators — always reset to hidden on a language switch
+                gr.update(visible=False), gr.update(visible=False), gr.update(visible=False),
+                gr.update(visible=False), gr.update(visible=False),
                 # "Details" accordions (collapsed long explanations) + their content
                 gr.update(label=l["accordion_details"]), gr.update(value=l["info_context_window_detail"]),
                 gr.update(label=l["accordion_details"]), gr.update(value=l["info_gen_agentic_detail"]), gr.update(value=l["info_memory_detail"]),
@@ -902,6 +990,10 @@ def build_ui():
             acc_kb_docs, refresh_btn, delete_sel_btn, clear_all_btn,
             # Status bars (Knowledge Base tab + RAG Chat tab)
             kb_status_bar, rag_status_bar,
+            # Status indicators (hidden "thinking…" lines) — reset to
+            # hidden on a language switch so a stale visible status from
+            # right before the switch doesn't linger in the old language.
+            status_gen, status_rag, status_dr, status_vis, status_data,
             # "Details" accordions (collapsed long explanations)
             acc_ctx_detail, ctx_window_detail_md,
             acc_gen_detail, gen_agentic_detail_md, gen_memory_detail_md,
