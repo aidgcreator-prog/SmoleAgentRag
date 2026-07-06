@@ -1,4 +1,4 @@
-"""
+﻿"""
 ui.py — Builds the Gradio Blocks UI and wires every event handler.
 
 Layout convention used on every tab that has settings: the primary input
@@ -302,6 +302,16 @@ def build_ui():
             # ── Tab 5: Knowledge Base ─────────────────────────────
             # No "⚙️ Settings" equivalent here — kept as a single column.
             with gr.Tab(L["tab_kb"]) as tab_kb:
+                # Index stats (text chunks / visual index) — only relevant
+                # here and on the RAG Chat tab (the two places retrieval
+                # actually happens), not on every tab. Populated lazily via
+                # demo.load() below (see that comment for why it isn't
+                # computed inline at build time), and refreshed after any
+                # upload/delete/clear action further down.
+                kb_status_bar = gr.Textbox(
+                    value="…", interactive=False,
+                    show_label=False, elem_classes=["status-bar"]
+                )
                 with gr.Accordion(L["accordion_add"], open=True) as acc_add:
                     file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md",".docx"], file_count="multiple")
                     vis_ret_dd = gr.Dropdown(choices=list(mr.VISUAL_RETRIEVER_OPTIONS.keys()), value=list(mr.VISUAL_RETRIEVER_OPTIONS.keys())[0], label=L["label_vis_ret"])
@@ -330,6 +340,13 @@ def build_ui():
                     with gr.Column(scale=3, min_width=260, elem_classes=["tab-sidebar"]):
                         rag_settings_header = gr.Markdown(f"### {L['accordion_settings']}", elem_classes=["sidebar-hd"])
                         rag_desc = gr.Markdown(L["tab_rag_desc"])
+                        # Same index stats as the Knowledge Base tab (text
+                        # chunks / visual index) — shown here too since RAG
+                        # Chat is the other place retrieval actually matters.
+                        rag_status_bar = gr.Textbox(
+                            value="…", interactive=False,
+                            show_label=False, elem_classes=["status-bar"]
+                        )
                         rag_agentic_chk = gr.Checkbox(
                             label=L["label_rag_agentic"], value=True,
                             info=L["info_rag_agentic"],
@@ -397,19 +414,6 @@ def build_ui():
                 about_md_kh = gr.Markdown(branding.about_content_kh(DEVICE.upper(), APP_VERSION))
                 gr.Markdown("---")
                 about_md_en = gr.Markdown(branding.about_content_en(DEVICE.upper(), APP_VERSION))
-
-        # Static placeholder at build time — kb.get_index_stats() calls
-        # models.get_chroma_collection(), which opens the ChromaDB client.
-        # Calling it inline here would force that open (and the "[RAG]
-        # ChromaDB ready …" log line) during build_ui(), before
-        # demo.launch() — i.e. exactly the eager-preload behavior this was
-        # meant to remove from app.py. Populated lazily via demo.load()
-        # below instead, same "defer until the UI actually mounts" pattern
-        # doc_table already uses (value=kb.get_doc_table, a callable).
-        status_bar = gr.Textbox(
-            value="…", interactive=False,
-            show_label=False, elem_classes=["status-bar"]
-        )
 
         # ── Event handlers ────────────────────────────────────────
 
@@ -721,7 +725,7 @@ def build_ui():
             else:              current.append(row)
             return current
 
-        def do_upload(files, vis_ret_label):
+        def do_upload(files, vis_ret_label, lang_key):
             import traceback
             try:
                 msg = kb.index_uploaded_files(files, vis_ret_label)
@@ -729,30 +733,36 @@ def build_ui():
                 msg = f"❌ {traceback.format_exc()}"
             # Reveal both the upload result and the (now updated) document
             # table — the table accordion stays collapsed until an upload,
-            # refresh, delete, or clear actually happens.
-            return gr.update(value=msg, visible=True), kb.get_doc_table(), gr.update(open=True)
+            # refresh, delete, or clear actually happens. Also refresh the
+            # index-stats textbox on both the Knowledge Base tab and the
+            # RAG Chat tab, since an upload changes what both show.
+            stats = kb.get_index_stats(lang_key)
+            return gr.update(value=msg, visible=True), kb.get_doc_table(), gr.update(open=True), stats, stats
 
         def unload_visual_fn(lang_key):
             return gr.update(value=kb.unload_visual_retriever_fn(lang_key), visible=True)
 
-        def do_refresh():
-            return kb.get_doc_table(), gr.update(open=True)
+        def do_refresh(lang_key):
+            stats = kb.get_index_stats(lang_key)
+            return kb.get_doc_table(), gr.update(open=True), stats, stats
 
-        def do_delete(selected, table_data):
+        def do_delete(selected, table_data, lang_key):
             rows = table_data if isinstance(table_data, list) else table_data.values.tolist()
             new_table, msg = kb.delete_selected_sources(selected, rows)
-            return new_table, gr.update(value=msg, visible=True), [], gr.update(open=True)
+            stats = kb.get_index_stats(lang_key)
+            return new_table, gr.update(value=msg, visible=True), [], gr.update(open=True), stats, stats
 
-        def do_clear():
+        def do_clear(lang_key):
             table, msg = kb.clear_index()
-            return table, gr.update(value=msg, visible=True), [], gr.update(open=True)
+            stats = kb.get_index_stats(lang_key)
+            return table, gr.update(value=msg, visible=True), [], gr.update(open=True), stats, stats
 
         doc_table.select(on_select,        [selected_rows_state], [selected_rows_state])
-        up_btn.click(do_upload,            [file_up, vis_ret_dd], [up_msg, doc_table, acc_kb_docs])
+        up_btn.click(do_upload,            [file_up, vis_ret_dd, lang_state], [up_msg, doc_table, acc_kb_docs, kb_status_bar, rag_status_bar])
         unload_visual_btn.click(unload_visual_fn, [lang_state], [up_msg])
-        refresh_btn.click(do_refresh,      outputs=[doc_table, acc_kb_docs])
-        delete_sel_btn.click(do_delete,    [selected_rows_state, doc_table], [doc_table, action_msg, selected_rows_state, acc_kb_docs])
-        clear_all_btn.click(do_clear,      outputs=[doc_table, action_msg, selected_rows_state, acc_kb_docs])
+        refresh_btn.click(do_refresh,      [lang_state], [doc_table, acc_kb_docs, kb_status_bar, rag_status_bar])
+        delete_sel_btn.click(do_delete,    [selected_rows_state, doc_table, lang_state], [doc_table, action_msg, selected_rows_state, acc_kb_docs, kb_status_bar, rag_status_bar])
+        clear_all_btn.click(do_clear,      [lang_state], [doc_table, action_msg, selected_rows_state, acc_kb_docs, kb_status_bar, rag_status_bar])
 
         # ── Language switcher ─────────────────────────────────────
         def switch_lang(lang_name):
@@ -857,7 +867,8 @@ def build_ui():
                 gr.update(value=l["btn_refresh"]),
                 gr.update(value=l["btn_delete"]),
                 gr.update(value=l["btn_clear_all"]),
-                # Status bar
+                # Status bars (Knowledge Base tab + RAG Chat tab)
+                kb.get_index_stats(lk),
                 kb.get_index_stats(lk),
                 # "Details" accordions (collapsed long explanations) + their content
                 gr.update(label=l["accordion_details"]), gr.update(value=l["info_context_window_detail"]),
@@ -889,8 +900,8 @@ def build_ui():
             # Knowledge Base
             acc_add, file_up, vis_ret_dd, up_btn, unload_visual_btn, up_msg,
             acc_kb_docs, refresh_btn, delete_sel_btn, clear_all_btn,
-            # Status bar
-            status_bar,
+            # Status bars (Knowledge Base tab + RAG Chat tab)
+            kb_status_bar, rag_status_bar,
             # "Details" accordions (collapsed long explanations)
             acc_ctx_detail, ctx_window_detail_md,
             acc_gen_detail, gen_agentic_detail_md, gen_memory_detail_md,
@@ -915,10 +926,12 @@ def build_ui():
         # runs after the user explicitly switches languages, well after
         # the initial page mount has finished.
 
-        # Narrow demo.load(): populates ONLY status_bar (a single output),
-        # not the 68-component language re-init the comment above avoids.
-        # This is what actually defers the ChromaDB client open until
-        # after the UI has mounted, instead of during build_ui().
-        demo.load(kb.get_index_stats, [lang_state], [status_bar])
+        # Narrow demo.load(): populates ONLY the two index-stats textboxes
+        # (Knowledge Base tab + RAG Chat tab), not the 68-component
+        # language re-init the comment above avoids. This is what actually
+        # defers the ChromaDB client open until after the UI has mounted,
+        # instead of during build_ui().
+        demo.load(kb.get_index_stats, [lang_state], [kb_status_bar])
+        demo.load(kb.get_index_stats, [lang_state], [rag_status_bar])
 
         return demo

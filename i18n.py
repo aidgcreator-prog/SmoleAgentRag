@@ -1,4 +1,4 @@
-"""
+﻿"""
 i18n.py — Localization (Khmer / English) strings for the Multipurpose AI
 Assistant UI. Kept isolated so translations can be edited without touching
 any app logic.
@@ -8,7 +8,7 @@ LANGUAGES = {
     "kh": {
         "title": "🤖 ជំនួយការ AI ពហុមុខងារ",
         "subtitle": (
-            'ដោយ LocalAiLab· កំណែ {version} · '
+            'ដោយ LocalAiLab · 🖥️ {device} · កំណែ {version} · '
             '<a href="https://youtube.com/@localailabkh" target="_blank">📺 យូធូបឆាណែល សំរាប់ការនែណាំ </a>'
         ),
         "accordion_chat": "💬 សន្ទនា",
@@ -131,7 +131,7 @@ LANGUAGES = {
     },
     "en": {
         "title": "🤖 Multipurpose AI Assistant",
-        "subtitle": "by LocalAiLab · smolagents · ChromaDB · {device} · v{version}",
+        "subtitle": "by LocalAiLab · smolagents · ChromaDB · 🖥️ {device} · v{version}",
         "accordion_chat": "💬 Conversation",
         "tab_general": "💬 General Chat",
         "tab_general_desc": "Direct conversation with the LLM — no retrieval.",
