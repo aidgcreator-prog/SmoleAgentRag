@@ -39,10 +39,6 @@ DATA_AGENT_MEMORY_TURNS = 3
 # agent_memory.reset_if_context_changed().
 _last_data_context = {"key": None}
 
-# See general_agent.MEMORY_TAB_KEY — namespaces this agent's persisted
-# memory file separately from the other tabs'.
-MEMORY_TAB_KEY = "data_analysis"
-
 
 @tool
 def install_package(package_name: str) -> str:
@@ -129,17 +125,14 @@ def get_data_agent(model_id: Optional[str] = None):
             pass
         _data_agent = CodeAgent(**agent_kwargs)
         _data_agent_model_id = target
-        # Restore this tab's persisted memory (if any) — GLOBAL across
-        # every model now, not keyed per (tab, model_id); see
-        # agent_memory.py's module docstring. Note this can restore
-        # memory that references a PREVIOUS dataset's columns/stats if the
-        # app was restarted with the same file still uploaded —
-        # run_data_analysis()'s reset_if_context_changed() call (keyed on
-        # the uploaded file paths, independent of this) still runs on
-        # every call and will drop it again if the dataset key doesn't
-        # match, so this is safe either way.
-        if agent_memory.load_agent_memory_into(_data_agent, MEMORY_TAB_KEY):
-            print(f"[DataAgent] Restored persisted (global) memory for '{target}'.")
+        # Standard smolagents behaviour: a freshly-built CodeAgent starts
+        # with empty memory. This only happens on first use, or after a
+        # model switch/reset via reset_agent() below — dataset changes are
+        # handled separately by reset_if_context_changed() in
+        # run_data_analysis(), which clears an EXISTING agent's memory in
+        # place rather than rebuilding it (see agent_memory.py's module
+        # docstring for why rebuilding-to-reset used to reintroduce the
+        # very stale memory it was meant to drop).
         return _data_agent
 
 
@@ -219,9 +212,13 @@ def run_data_analysis(files, question: str, model_label: str, history: list, use
         # drop it even though the model itself hasn't changed. Only
         # relevant when memory is on — when it's off, reset=True below
         # already makes every run stateless regardless of dataset.
+        # Clears agent.memory.steps directly on the SAME agent object —
+        # see agent_memory.reset_if_context_changed()/reset_memory()'s
+        # docstrings for why this (rather than tearing down and rebuilding
+        # the agent, as an earlier version of this file did) is required
+        # for the reset to actually stick.
         if use_memory:
-            agent_memory.reset_if_context_changed(reset_agent, _last_data_context, tuple(sorted(paths)))
-        agent = get_data_agent(model_id)  # re-fetch in case reset_agent() just cleared the cache
+            agent_memory.reset_if_context_changed(agent, _last_data_context, tuple(sorted(paths)))
         file_list_str = "\n".join(f"- {p}" for p in paths)
         report_path = str(Path(mr.DATA_OUTPUT_DIR) / "report.md")
 
@@ -311,11 +308,6 @@ correlation is possible). Aim for several charts, not just one.
         result = agent.run(task, reset=not use_memory)
         if use_memory:
             agent_memory.cap_agent_memory(agent, max_turns=DATA_AGENT_MEMORY_TURNS)
-            # Persist to disk too, not just RAM — so memory survives an
-            # app restart, not only a same-session model switch. GLOBAL
-            # for this tab (shared across every model), not keyed by
-            # model_id — see agent_memory.py's module docstring.
-            agent_memory.save_agent_memory(agent, MEMORY_TAB_KEY)
         elapsed = time.time() - t0
 
         report_text = str(result)

@@ -53,10 +53,10 @@ max_steps, or the connection drops entirely.
 
 import gradio as gr
 
-import agent_memory
 import branding
 import chat
 import data_analysis
+import deep_research_agent
 import general_agent
 import knowledge_base as kb
 import llama_backend
@@ -325,7 +325,42 @@ def build_ui():
                             msg_rag  = gr.Textbox(placeholder=L["placeholder_rag"], show_label=False, scale=8)
                             send_rag = gr.Button(L["btn_send"], variant="primary", scale=1)
 
-            # ── Tab 8: About ──────────────────────────────────────
+            # ── Tab 8: Deep Research (manager + web-search sub-agent — ──
+            # see deep_research_agent.py) ─────────────────────────────
+            with gr.Tab(L["tab_deep_research"]) as tab_deep_research:
+                with gr.Row():
+                    with gr.Column(scale=3, min_width=260, elem_classes=["tab-sidebar"]):
+                        dr_settings_header = gr.Markdown(f"### {L['accordion_settings']}", elem_classes=["sidebar-hd"])
+                        dr_desc = gr.Markdown(L["tab_deep_research_desc"])
+                        dr_memory_chk = gr.Checkbox(
+                            label=L["label_memory"], value=True,
+                            info=L["info_memory"],
+                        )
+                        with gr.Accordion(L["accordion_details"], open=False) as acc_dr_detail:
+                            dr_memory_detail_md = gr.Markdown(L["info_memory_detail"])
+                        model_dd_dr = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"])
+                        with gr.Row():
+                            reload_dr     = gr.Button(L["btn_load"], size="sm")
+                            unload_dr_btn = gr.Button(L["btn_unload"], size="sm")
+                        reload_dr_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                        # Rebuilds just the manager+search-agent wrapper
+                        # (not the underlying LLM) — useful if a run gets
+                        # stuck mid-delegation, same role as Data
+                        # Analysis's reset button.
+                        reset_dr_btn = gr.Button(L["btn_reset_agent"], size="sm")
+                        reset_dr_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                        # See pending_gen_msg above — same stash-then-clear
+                        # pattern applied to Deep Research's message box.
+                        pending_dr_msg = gr.State("")
+                    with gr.Column(scale=7):
+                        with gr.Accordion(L["accordion_chat"], open=False) as acc_dr_chat:
+                            bot_dr   = gr.Chatbot(height=460)
+                            clear_dr = gr.Button(L["btn_clear"], size="sm")
+                        with gr.Row():
+                            msg_dr  = gr.Textbox(placeholder=L["placeholder_deep_research"], show_label=False, scale=8)
+                            send_dr = gr.Button(L["btn_send"], variant="primary", scale=1)
+
+            # ── Tab 9: About ──────────────────────────────────────
             with gr.Tab(L["tab_about"]) as tab_about:
                 about_md_kh = gr.Markdown(branding.about_content_kh(DEVICE.upper(), APP_VERSION))
                 gr.Markdown("---")
@@ -372,12 +407,13 @@ def build_ui():
             n_ctx = mr.CONTEXT_WINDOW_OPTIONS.get(label, mr.DEFAULT_CONTEXT_WINDOW)
             mr.set_context_window(n_ctx)
             # Every agentic CodeAgent wrapper holds its own reference to
-            # the shared LLM object — drop all three caches so none of
+            # the shared LLM object — drop all four caches so none of
             # them keep pointing at the model instance we're about to
             # release below (same pattern as reload_gen_fn/reload_rag_fn).
             general_agent.reset_agent()
             rag_agent.reset_agent()
             data_analysis.reset_agent()
+            deep_research_agent.reset_agent()
             currently_loaded = models._llm_model_id
             if models._llm is not None and str(currently_loaded).lower().endswith(".gguf"):
                 try:
@@ -444,14 +480,13 @@ def build_ui():
             # Clearing the visible chat should also clear the agentic
             # CodeAgent's own memory (agent.memory.steps) — otherwise a
             # "fresh" conversation would still secretly remember the old
-            # one via agent.run(..., reset=False). The direct (non-agentic)
-            # path's memory comes from the chat history itself, which this
-            # already wipes. Also delete the persisted-to-disk copy (see
-            # agent_memory.py) so a cleared conversation stays cleared
-            # across an app restart too, not just for the rest of this
-            # session.
+            # one via agent.run(..., reset=False). Dropping the cached
+            # agent object is enough: the next build starts with empty
+            # memory (standard smolagents behaviour — see
+            # agent_memory.py's module docstring for why this app no
+            # longer persists memory to disk that would need clearing
+            # separately here).
             general_agent.reset_agent()
-            agent_memory.clear_saved_memory(general_agent.MEMORY_TAB_KEY)
             return [], "", gr.update(open=False)
 
         clear_gen.click(clear_gen_fn, outputs=[bot_gen, msg_gen, acc_gen_chat])
@@ -497,16 +532,62 @@ def build_ui():
         )
 
         def clear_rag_fn():
-            # See clear_gen_fn() above — also drops the agentic CodeAgent's
-            # own memory (RAM + persisted-to-disk copy) so a cleared
-            # conversation is actually fresh, including across a restart.
+            # See clear_gen_fn() above — dropping the cached CodeAgent is
+            # enough to guarantee a fresh, empty-memory agent next build.
             rag_agent.reset_agent()
-            agent_memory.clear_saved_memory(rag_agent.MEMORY_TAB_KEY)
             return [], "", gr.update(open=False)
 
         clear_rag.click(clear_rag_fn, outputs=[bot_rag, msg_rag, acc_rag_chat])
         reload_rag.click(reload_rag_fn, [model_dd_rag], [reload_rag_out])
         unload_rag_btn.click(unload_rag_fn, [lang_state], [reload_rag_out])
+
+        # Deep Research (manager + web_search_agent — see deep_research_agent.py)
+        def reload_dr_fn(label):
+            deep_research_agent.reset_agent()
+            mid = mr.MODEL_OPTIONS.get(label, mr.DEFAULT_LLM_MODEL)
+            try:
+                models.force_reload_llm(mid)
+                return gr.update(value=f"✅ '{mid}' loaded", visible=True)
+            except Exception as e:
+                return gr.update(value=f"❌ {e}", visible=True)
+
+        def unload_dr_fn(lang_key):
+            msg = models.unload_llm_fn(lang_key)
+            deep_research_agent.reset_agent()
+            return gr.update(value=msg, visible=True)
+
+        def reset_dr_agent_fn():
+            deep_research_agent.reset_agent()
+            return gr.update(value="✅ Agent reset — will rebuild on next run.", visible=True)
+
+        def stash_dr(user_message):
+            # See stash_gen() above.
+            return "", user_message
+
+        def do_chat_deep_research(pending_message, history, model_label, use_memory):
+            history, _ = chat.chat_deep_research(pending_message, history, model_label, use_memory)
+            return history, gr.update(open=True)
+
+        msg_dr.submit(stash_dr, [msg_dr], [msg_dr, pending_dr_msg], queue=False).then(
+            do_chat_deep_research, [pending_dr_msg, bot_dr, model_dd_dr, dr_memory_chk],
+            [bot_dr, acc_dr_chat]
+        )
+        send_dr.click(stash_dr, [msg_dr], [msg_dr, pending_dr_msg], queue=False).then(
+            do_chat_deep_research, [pending_dr_msg, bot_dr, model_dd_dr, dr_memory_chk],
+            [bot_dr, acc_dr_chat]
+        )
+
+        def clear_dr_fn():
+            # See clear_gen_fn() above — dropping the cached manager agent
+            # (and its search sub-agent) is enough to guarantee a fresh,
+            # empty-memory agent next build.
+            deep_research_agent.reset_agent()
+            return [], "", gr.update(open=False)
+
+        clear_dr.click(clear_dr_fn, outputs=[bot_dr, msg_dr, acc_dr_chat])
+        reload_dr.click(reload_dr_fn, [model_dd_dr], [reload_dr_out])
+        unload_dr_btn.click(unload_dr_fn, [lang_state], [reload_dr_out])
+        reset_dr_btn.click(reset_dr_agent_fn, outputs=[reset_dr_out])
 
         # Vision Chat
         def load_vlm_fn(label):
@@ -589,13 +670,11 @@ def build_ui():
         )
 
         def clear_data_fn():
-            # See clear_gen_fn() above — also drops the Data Analysis
-            # agent's own memory (RAM + persisted-to-disk copy) so a
-            # cleared conversation starts fresh, including across a
-            # restart (also resets the "last dataset" tracker so the next
-            # upload doesn't skip a reset it should otherwise trigger).
+            # See clear_gen_fn() above — dropping the cached agent is
+            # enough to guarantee fresh memory next build. Also resets the
+            # "last dataset" tracker so the next upload doesn't skip a
+            # reset it should otherwise trigger.
             data_analysis.reset_agent()
-            agent_memory.clear_saved_memory(data_analysis.MEMORY_TAB_KEY)
             data_analysis._last_data_context["key"] = None
             return [], None, None, gr.update(open=False), gr.update(open=False)
 
@@ -681,6 +760,18 @@ def build_ui():
                 gr.update(label=l["label_llm"]),
                 gr.update(value=l["btn_load"]),
                 gr.update(value=l["btn_unload"]),
+                # Deep Research
+                gr.update(placeholder=l["placeholder_deep_research"]),
+                gr.update(value=l["btn_send"]),
+                gr.update(value=l["btn_clear"]),
+                gr.update(label=l["accordion_chat"]),
+                gr.update(value=f"### {l['accordion_settings']}"),
+                gr.update(value=l["tab_deep_research_desc"]),
+                gr.update(label=l["label_memory"], info=l["info_memory"]),
+                gr.update(label=l["label_llm"]),
+                gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_unload"]),
+                gr.update(value=l["btn_reset_agent"]),
                 # Vision Chat
                 gr.update(placeholder=l["placeholder_vis"]),
                 gr.update(value=l["btn_send"]),
@@ -736,6 +827,7 @@ def build_ui():
                 gr.update(label=l["accordion_details"]), gr.update(value=l["info_context_window_detail"]),
                 gr.update(label=l["accordion_details"]), gr.update(value=l["info_gen_agentic_detail"]), gr.update(value=l["info_memory_detail"]),
                 gr.update(label=l["accordion_details"]), gr.update(value=l["info_rag_agentic_detail"]), gr.update(value=l["info_memory_detail"]),
+                gr.update(label=l["accordion_details"]), gr.update(value=l["info_memory_detail"]),
                 gr.update(label=l["accordion_details"]), gr.update(value=l["label_vis_rag_info_detail"]), gr.update(value=l["info_memory_detail"]),
                 gr.update(label=l["accordion_details"]), gr.update(value=l["stt_khmer_hint_detail"]),
                 gr.update(label=l["accordion_details"]), gr.update(value=l["info_memory_detail"]),
@@ -748,6 +840,8 @@ def build_ui():
             msg_gen, send_gen, clear_gen, acc_gen_chat, gen_settings_header, gen_desc, gen_agentic_chk, gen_memory_chk, model_dd_gen, reload_gen, unload_gen_btn,
             # RAG Chat
             msg_rag, send_rag, clear_rag, acc_rag_chat, rag_settings_header, rag_desc, rag_agentic_chk, rag_memory_chk, model_dd_rag, reload_rag, unload_rag_btn,
+            # Deep Research
+            msg_dr, send_dr, clear_dr, acc_dr_chat, dr_settings_header, dr_desc, dr_memory_chk, model_dd_dr, reload_dr, unload_dr_btn, reset_dr_btn,
             # Vision Chat
             msg_vis, send_vis, clear_vis, acc_vis_chat, vis_settings_header, vis_desc, vlm_dd, vis_rag_chk, vis_memory_chk, load_vlm_btn, unload_vlm_btn,
             # STT
@@ -765,6 +859,7 @@ def build_ui():
             acc_ctx_detail, ctx_window_detail_md,
             acc_gen_detail, gen_agentic_detail_md, gen_memory_detail_md,
             acc_rag_detail, rag_agentic_detail_md, rag_memory_detail_md,
+            acc_dr_detail, dr_memory_detail_md,
             acc_vis_detail, vis_rag_detail_md, vis_memory_detail_md,
             acc_stt_detail, stt_hint_detail_md,
             acc_data_detail, data_memory_detail_md,

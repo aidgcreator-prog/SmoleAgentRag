@@ -45,6 +45,7 @@ def about_content_kh(device: str, version: str) -> str:
 |---|---|
 | 💬 ការសន្ទនាទូទៅ | ការសន្ទនាផ្ទាល់ជាមួយ LLM — មិនមានការទាញយក |
 | 📚 ការសន្ទនា RAG | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន រួចឆ្លើយ |
+| 🔬 ស្រាវជ្រាវស៊ីជម្រៅ | Agent គ្រប់គ្រង + agent ស្វែងរកតាមអ៊ីនធឺណិត — បំបែកសំណួរ រៀបចំផែនការឡើងវិញ ស្វែងរកជាបន្តបន្ទាប់ រួចសរសេររបាយការណ៍ Markdown ដែលមានប្រភពយោង |
 | 🖼️ ការសន្ទនាចក្ខុវិស័យ | យល់ដឹងរូបភាព ជាមួយបរិបទអត្ថបទ |
 | 🎙️ និយាយទៅជាអក្សរ | បំលែងសំឡេងជាអក្សរ ដោយប្រើ Whisper |
 | 📊 វិភាគទិន្នន័យ | Agent វិភាគ CSV/Excel បង្កើតក្រាហ្វិក និងរបាយការណ៍ |
@@ -92,6 +93,7 @@ HuggingFace (transformers) models or local GGUF models via llama.cpp. Built by L
 |---|---|
 | 💬 General Chat | Direct LLM conversation — no retrieval |
 | 📚 RAG Chat | Retrieves from knowledge base first, then answers |
+| 🔬 Deep Research | Manager agent + web-search sub-agent — breaks the question down, re-plans as it goes, and writes a structured Markdown report with sources |
 | 🖼️ Vision Chat | Image understanding with optional text context |
 | 🎙️ Speech to Text | Transcribe audio into text using Whisper |
 | 📊 Data Analysis | Agent analyzes CSV/Excel, builds charts and a report |

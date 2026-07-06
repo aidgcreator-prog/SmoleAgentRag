@@ -24,7 +24,6 @@ from typing import Optional
 
 from smolagents import CodeAgent
 
-import agent_memory
 import model_registry as mr
 import models
 from knowledge_base import RetrieverTool
@@ -33,10 +32,6 @@ _rag_agent          = None
 _rag_agent_model_id = None
 _rag_tool           = None
 _rag_agent_lock     = threading.Lock()
-
-# See general_agent.MEMORY_TAB_KEY — namespaces this agent's persisted
-# memory file separately from the other tabs'.
-MEMORY_TAB_KEY = "rag"
 
 # ──────────────────────────────────────────────────────────────────
 # Strict grounding — layer 1: agent-level system instructions (applied
@@ -207,11 +202,10 @@ def get_rag_agent(model_id: Optional[str] = None):
         _rag_tool  = RetrieverTool()
         _rag_agent = _build_code_agent(llm, _rag_tool, target)
         _rag_agent_model_id = target
-        # Restore this tab's persisted memory (if any) — GLOBAL across
-        # every model now, not keyed per (tab, model_id). See
-        # agent_memory.py's module docstring for the tradeoffs.
-        if agent_memory.load_agent_memory_into(_rag_agent, MEMORY_TAB_KEY):
-            print(f"[RAGAgent] Restored persisted (global) memory for '{target}'.")
+        # Standard smolagents behaviour: a freshly-built CodeAgent starts
+        # with empty memory. See agent_memory.py's module docstring for
+        # why this app no longer tries to restore memory from a previous
+        # model or app session.
         return _rag_agent
 
 

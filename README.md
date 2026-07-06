@@ -115,7 +115,7 @@ python app.py
 
 ### 🖥️ ចំណុចប្រទាក់អ្នកប្រើប្រាស់
 
-កម្មវិធីនេះមានផ្ទាំងសំខាន់ៗចំនួនប្រាំពីរ តាមលំដាប់ដូចខាងក្រោម៖
+កម្មវិធីនេះមានផ្ទាំងសំខាន់ៗចំនួនប្រាំបី តាមលំដាប់ដូចខាងក្រោម៖
 
 | # | ផ្ទាំង | ការពិពណ៌នា |
 |---|---|---|
@@ -125,12 +125,13 @@ python app.py
 | 4 | 📊 **វិភាគទិន្នន័យ** | បង្ហោះ CSV/Excel ឱ្យ AI Agent វិភាគ បង្កើតក្រាហ្វិក និងសរសេររបាយការណ៍ Markdown |
 | 5 | 📂 **មូលដ្ឋានចំណេះដឹង** | គ្រប់គ្រងឯកសារដែលបានបញ្ចូល (PDF/TXT/MD/DOCX) មើលតារាង និងសម្អាតការបញ្ចូល |
 | 6 | 📚 **ការសន្ទនា RAG** | ទាញយកពីមូលដ្ឋានចំណេះដឹងជាមុន (ដោយផ្ទាល់ ឬដោយ Agent) មុននឹងឆ្លើយ |
-| 7 | ℹ️ **អំពីកម្មវិធី** | ស្ថានភាពប្រព័ន្ធ ស្ថាបត្យកម្ម និងល្បឿនរំពឹងទុក — បង្ហាញជានិច្ចជាភាសាខ្មែរនិងអង់គ្លេសទាំងពីរ |
+| 7 | 🔬 **ស្រាវជ្រាវស៊ីជម្រៅ** | Agent គ្រប់គ្រង + agent ស្វែងរកតាមអ៊ីនធឺណិត បំបែកសំណួរជាសំណួររង រៀបចំផែនការឡើងវិញ រួចសរសេររបាយការណ៍ Markdown ដែលមានប្រភពយោង (ត្រូវការម៉ូដែលធំ)
+| 8 | ℹ️ **អំពីកម្មវិធី** | ស្ថានភាពប្រព័ន្ធ ស្ថាបត្យកម្ម និងល្បឿនរំពឹងទុក — បង្ហាញជានិច្ចជាភាសាខ្មែរនិងអង់គ្លេសទាំងពីរ |
 
 #### លក្ខណៈពិសេសសំខាន់ៗ
 - **ចំណុចប្រទាក់ពីរភាសា**៖ ខ្មែរ/អង់គ្លេស ប្តូរបានភ្លាមៗតាមបញ្ជីទម្លាក់ភាសា
 - **ម៉ូដែលពីរប្រភេទ**៖ HuggingFace/transformers ឬ GGUF (llama.cpp) ក្នុងបញ្ជីទម្លាក់ដូចគ្នា
-- **ចងចាំការសន្ទនា**៖ ប្រអប់ "🧠 ចងចាំការសន្ទនា" នៅគ្រប់ផ្ទាំង agentic — បើកដើម្បីឱ្យសំណួរបន្តអាចយោងលើអ្វីដែលបាននិយាយពីមុន
+- **ចងចាំការសន្ទនា (កំពុងសាកល្បង)**៖ ប្រអប់ "🧠 ចងចាំការសន្ទនា" នៅគ្រប់ផ្ទាំង agentic — បើកដើម្បីឱ្យសំណួរបន្តអាចយោងលើអ្វីដែលបាននិយាយពីមុន។ ការចងចាំមាននៅតែក្នុងវគ្គដំណើរការបច្ចុប្បន្នប៉ុណ្ណោះ (មិនរក្សាទុកទៅថាសទេ) ហើយនឹងត្រូវកំណត់ចេញនៅពេលប្តូរម៉ូដែល ចុច "សម្អាត" ឬចាប់ផ្តើមកម្មវិធីឡើងវិញ
 - **ការគាំទ្រឯកសារ DOCX**៖ ការបញ្ចូលឯកសារគាំទ្រ Word (.docx) រួមទាំងអត្ថបទក្នុងតារាង
 - **ការជួសជុលបរិយាកាសដោយខ្លួនឯង**៖ ប៊ូតុង "Fix Environment" ដំឡើង PyTorch ត្រឹមត្រូវសម្រាប់ GPU របស់អ្នកដោយស្វ័យប្រវត្តិ
 - **ភាពមើលឃើញនៃការគិត**៖ ស្លាក `<think>` របស់ម៉ូដែលបង្ហាញជាផ្នែកដែលអាចពង្រីក/បង្រួមបាន
@@ -218,9 +219,10 @@ python app.py
 ├── model_registry.py # បញ្ជីជម្រើសម៉ូដែល (LLM/VLM/STT) និងការស្កេន GGUF ឡើងវិញ
 ├── models.py         # ការផ្ទុក/ដោះស្រាយ/ដំណើរការ LLM, VLM, STT
 ├── knowledge_base.py # ការបញ្ចូលឯកសារ (PDF/TXT/MD/DOCX), ChromaDB, Visual Index, ការទាញយក
-├── agent_memory.py   # ការចងចាំចម្រុះវេនសម្រាប់ CodeAgent (RAM + ជាប់លាប់លើថាស)
+├── agent_memory.py   # ការចងចាំចម្រុះវេនសម្រាប់ CodeAgent (RAM តែប៉ុណ្ណោះ — មិនរក្សាទុកទៅថាសទេ)
 ├── general_agent.py  # CodeAgent សម្រាប់ការសន្ទនាទូទៅបែប Agent (web search)
 ├── rag_agent.py      # CodeAgent សម្រាប់ RAG បែប Agent (retriever tool)
+├── deep_research_agent.py # Agent គ្រប់គ្រង + agent ស្វែងរកតាមអ៊ីនធឺណិត សម្រាប់ស្រាវជ្រាវស៊ីជម្រៅ
 ├── data_analysis.py  # CodeAgent សម្រាប់វិភាគ CSV/Excel
 ├── chat.py           # Handler សន្ទនាសម្រាប់ផ្ទាំង General/RAG/Vision
 ├── ui.py             # ការសង់ចំណុចប្រទាក់ Gradio និងការភ្ជាប់ event ទាំងអស់
@@ -230,8 +232,7 @@ python app.py
 ├── RUN.bat/.ps1      # កម្មវិធីដំណើរការលើ Windows ដោយចុចតែម្តង
 ├── README.md         # ឯកសារនេះ
 ├── chroma_db/        # បង្កើតដោយស្វ័យប្រវត្តិ; ការផ្ទុកទិន្នន័យជាប់លាប់របស់ ChromaDB
-├── visual_index/     # បង្កើតដោយស្វ័យប្រវត្តិ; ការផ្ទុក Visual Index
-└── agent_memory_store/ # បង្កើតដោយស្វ័យប្រវត្តិ; ការចងចាំ Agent ដែលរក្សាទុកជាប់លាប់
+└── visual_index/     # បង្កើតដោយស្វ័យប្រវត្តិ; ការផ្ទុក Visual Index
 ```
 
 ---
@@ -348,7 +349,7 @@ Or on Windows, double-click **RUN.bat**. Open [http://localhost:7861](http://loc
 
 ### 🖥️ User Interface
 
-The app is organized into seven main tabs, in this order:
+The app is organized into eight main tabs, in this order:
 
 | # | Tab | Description |
 |---|---|---|
@@ -358,12 +359,13 @@ The app is organized into seven main tabs, in this order:
 | 4 | 📊 **Data Analysis** | Upload CSV/Excel; the AI agent explores it, builds charts, and writes a report |
 | 5 | 📂 **Knowledge Base** | Manage indexed documents (PDF/TXT/MD/DOCX), view the table, clear the index |
 | 6 | 📚 **RAG Chat** | Retrieves from the knowledge base first (directly or agentically), then answers |
-| 7 | ℹ️ **About** | System status, architecture, and performance expectations — always bilingual |
+| 7 | 🔬 **Deep Research** | A manager agent + web-search sub-agent break the question into sub-questions, re-plan as they go, and write a structured Markdown report with sources (needs a capable model) |
+| 8 | ℹ️ **About** | System status, architecture, and performance expectations — always bilingual |
 
 #### Key Features
 - **Bilingual UI**: full Khmer/English interface — switch instantly with the language dropdown
 - **Two model backends**: HuggingFace/transformers or local GGUF models via llama.cpp, in the same dropdown
-- **Conversation Memory**: a "🧠 Conversation Memory" toggle on every agentic tab lets follow-up questions refer back to earlier turns
+- **Conversation Memory (Experimental)**: a "🧠 Conversation Memory" toggle on every agentic tab lets follow-up questions refer back to earlier turns. Memory only lives for the current running session (not saved to disk), and resets on a model switch, "Clear", or an app restart
 - **DOCX support**: document indexing supports Word (.docx) files, including text inside tables
 - **Environment Self-Fixing**: the "Fix Environment" button installs the correct PyTorch build for your GPU automatically
 - **Reasoning Visibility**: model `<think>` tags render as a clean, collapsible UI element
@@ -451,9 +453,10 @@ For people with beefier hardware who want noticeably stronger local models than 
 ├── model_registry.py  # Model dropdown options (LLM/VLM/STT) + GGUF rescan
 ├── models.py          # LLM/VLM/STT loading, caching, unloading, inference
 ├── knowledge_base.py  # Document indexing (PDF/TXT/MD/DOCX), ChromaDB, visual index, retrieval
-├── agent_memory.py    # Multi-turn memory helper for CodeAgents (RAM + on-disk persistence)
+├── agent_memory.py    # Multi-turn memory helper for CodeAgents (in-RAM only — no disk persistence, see file docstring)
 ├── general_agent.py   # Agentic General Chat CodeAgent (web search tools)
 ├── rag_agent.py        # Agentic RAG CodeAgent (retriever tool)
+├── deep_research_agent.py # Manager + web-search sub-agent for Deep Research
 ├── data_analysis.py   # CodeAgent for CSV/Excel exploration
 ├── chat.py            # Chat-turn handlers for General/RAG/Vision tabs
 ├── ui.py              # Gradio Blocks UI + all event wiring
@@ -463,6 +466,5 @@ For people with beefier hardware who want noticeably stronger local models than 
 ├── RUN.bat/.ps1       # Windows one-click launcher
 ├── README.md          # This file
 ├── chroma_db/         # Auto-created; ChromaDB persistent storage
-├── visual_index/      # Auto-created; visual index storage
-└── agent_memory_store/ # Auto-created; persisted agent conversation memory
+└── visual_index/      # Auto-created; visual index storage
 ```

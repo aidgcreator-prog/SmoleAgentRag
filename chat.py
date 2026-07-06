@@ -14,13 +14,19 @@ import model_registry as mr
 import models
 import general_agent
 import rag_agent
+import deep_research_agent
 import agent_memory
 from hardware import DEVICE
 
-# NOTE: agent_memory.save_agent_memory() persists to disk under the tab
-# key constants general_agent.MEMORY_TAB_KEY / rag_agent.MEMORY_TAB_KEY —
-# see agent_memory.py's module docstring for why memory is namespaced per
-# (tab, model_id) rather than shared/replayed across model switches.
+# NOTE: agentic memory (agent.memory.steps) lives only in RAM, for as long
+# as the cached CodeAgent object for that tab stays alive — see
+# agent_memory.py's module docstring for why this app deliberately does
+# NOT persist it to disk. The "🧠 Conversation Memory" checkbox is marked
+# experimental in the UI for the same reason: it resets on a model
+# switch, "Clear", or an app restart, and — especially with small/local
+# models — can occasionally produce a confused reply if a step written by
+# one model gets replayed against a different one after a mid-conversation
+# model switch.
 
 # How many prior user+assistant exchanges to feed back into the *direct*
 # (non-agentic) chat paths as short-term conversation memory. Agentic
@@ -31,6 +37,12 @@ DIRECT_CHAT_MEMORY_TURNS = 6
 # How many turns of memory an agentic CodeAgent is allowed to keep before
 # older turns get dropped (see agent_memory.cap_agent_memory()).
 AGENTIC_MEMORY_TURNS = 6
+
+# Deep Research reports are much longer per turn than a normal chat
+# answer (and each turn can also include several delegated sub-agent
+# calls), so its memory budget is kept smaller than the other agentic
+# tabs' default — same reasoning as data_analysis.DATA_AGENT_MEMORY_TURNS.
+DEEP_RESEARCH_MEMORY_TURNS = 4
 
 
 def format_llm_response(text: str) -> str:
@@ -186,10 +198,6 @@ def chat_general_agentic(user_message: str, history: list, model_label: str, use
         result = agent.run(user_message, reset=not use_memory)
         if use_memory:
             agent_memory.cap_agent_memory(agent, max_turns=AGENTIC_MEMORY_TURNS)
-            # Persist to disk too — GLOBALLY for this tab (shared across
-            # every model), not keyed by model_id — see agent_memory.py's
-            # module docstring.
-            agent_memory.save_agent_memory(agent, general_agent.MEMORY_TAB_KEY)
         elapsed = time.time() - t0
 
         turn_count = sum(1 for s in agent.memory.steps if s.__class__.__name__ == "TaskStep")
@@ -372,10 +380,6 @@ def chat_rag(user_message: str, history: list, model_label: str, use_agentic: bo
         result = agent.run(task, reset=not use_memory)
         if use_memory:
             agent_memory.cap_agent_memory(agent, max_turns=AGENTIC_MEMORY_TURNS)
-            # Persist to disk too — GLOBALLY for this tab (shared across
-            # every model), not keyed by model_id — see agent_memory.py's
-            # module docstring.
-            agent_memory.save_agent_memory(agent, rag_agent.MEMORY_TAB_KEY)
         elapsed = time.time() - t0
 
         call_count, found_count, sources_used = rag_agent.get_retriever_stats()
@@ -448,3 +452,74 @@ def chat_vision(user_message: str, uploaded_image, history: list,
         response = f"❌ {e}\n\n{traceback.format_exc()}"
     history.append({"role": "assistant", "content": response})
     return history, None
+
+
+def chat_deep_research(user_message: str, history: list, model_label: str, use_memory: bool = True):
+    """Deep Research tab: a two-agent smolagents setup modeled on
+    HuggingFace's own open_deep_research example (see
+    https://github.com/huggingface/smolagents/tree/main/examples/open_deep_research)
+    — a manager CodeAgent that periodically re-plans (`planning_interval`)
+    and delegates focused sub-questions to a dedicated `web_search_agent`
+    sub-agent (see deep_research_agent.py), rather than one agent doing
+    everything itself the way General Chat's agentic mode does. Produces
+    a longer, structured Markdown report with a verified sources list
+    instead of a short conversational answer — expect this to take
+    noticeably longer per turn than General/RAG Chat.
+
+    Same reliability caveat as every agentic tab in this app: needs a
+    genuinely capable model (roughly Qwen3-4B and above) — the manager
+    also has to correctly invoke a SUB-AGENT (not just a tool) and
+    periodically re-plan, which is a harder ask than General Chat's
+    single-agent tool use.
+
+    `use_memory` controls the "🧠 Conversation Memory (Experimental)"
+    checkbox — see chat_general()'s docstring for what it does; same
+    RAM-only, resets-on-model-switch/Clear/restart behaviour applies here.
+    """
+    if not user_message.strip():
+        return history, ""
+    history = history or []
+    history.append({"role": "user", "content": user_message})
+    model_id = mr.MODEL_OPTIONS.get(model_label, mr.DEFAULT_LLM_MODEL)
+    try:
+        agent = deep_research_agent.get_deep_research_agent(model_id)
+        deep_research_agent.reset_tool_usage()
+        t0     = time.time()
+        # reset=False keeps the manager's own memory (its steps include
+        # every call it made to web_search_agent) across turns — same
+        # smolagents pattern as every other agentic tab. Capped right
+        # after so a long research conversation doesn't grow the prompt
+        # unboundedly turn after turn.
+        result = agent.run(user_message, reset=not use_memory)
+        if use_memory:
+            agent_memory.cap_agent_memory(agent, max_turns=DEEP_RESEARCH_MEMORY_TURNS)
+        elapsed = time.time() - t0
+
+        turn_count = sum(1 for s in agent.memory.steps if s.__class__.__name__ == "TaskStep")
+        ans = str(result)
+        # Same verified-sources approach as General Chat's agentic mode —
+        # reuses general_agent's own citation-checking helpers rather than
+        # duplicating that logic, since they're generic string/list
+        # functions with no dependency on general_agent's own tool state.
+        queries, urls, links = deep_research_agent.get_tool_usage()
+        used_sources = general_agent.resolve_actually_used_sources(ans, urls, links)
+        ans = general_agent.strip_trailing_references_section(ans)
+        if used_sources:
+            ref_lines = ["**🔗 Sources used for this report:**"]
+            ref_lines.extend(
+                f"- {url}" if title == url else f"- [{title}]({url})"
+                for title, url in used_sources
+            )
+            ans += "\n\n---\n" + "\n".join(ref_lines)
+        formatted = format_llm_response(ans)
+        response = (
+            formatted +
+            f"\n\n<hr><sub>⏱ {elapsed:.1f}s | model: <code>{model_id}</code> "
+            f"({DEVICE.upper()}) | deep research · manager + web-search sub-agent · "
+            f"memory: {'on (' + str(turn_count) + ' turn(s))' if use_memory else 'off'}</sub>"
+        )
+    except Exception as e:
+        import traceback
+        response = f"❌ {e}\n\n{traceback.format_exc()}"
+    history.append({"role": "assistant", "content": response})
+    return history, ""

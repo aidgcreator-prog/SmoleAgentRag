@@ -48,7 +48,6 @@ from typing import Optional
 
 from smolagents import CodeAgent, DuckDuckGoSearchTool, SpeechToTextTool, VisitWebpageTool
 
-import agent_memory
 import model_registry as mr
 import models
 
@@ -248,12 +247,6 @@ class TrackedVisitWebpageTool(VisitWebpageTool):
 _search_tool  = None
 _webpage_tool = None
 
-# Tab key used to namespace this agent's persisted memory file on disk —
-# see agent_memory.save_agent_memory()/load_agent_memory_into(). Kept as a
-# constant so chat.py can call save_agent_memory() after agent.run()
-# without needing to know/repeat this tab's internal name.
-MEMORY_TAB_KEY = "general"
-
 GENERAL_AGENT_INSTRUCTIONS = (
     "You are a helpful, friendly assistant.\n\n"
     "THE ONLY TOOLS THAT EXIST are: `web_search` (live web search), "
@@ -382,14 +375,11 @@ def get_general_agent(model_id: Optional[str] = None):
         llm = models.get_llm(target)
         _general_agent = _build_code_agent(llm, target)
         _general_agent_model_id = target
-        # A freshly-built CodeAgent starts with empty memory — restore
-        # whatever was last persisted to disk for THIS TAB, GLOBALLY
-        # across every model (see agent_memory.py's module docstring —
-        # memory is intentionally shared across model switches now, not
-        # namespaced per model). No-ops silently if nothing was ever
-        # saved for this tab yet.
-        if agent_memory.load_agent_memory_into(_general_agent, MEMORY_TAB_KEY):
-            print(f"[GeneralAgent] Restored persisted (global) memory for '{target}'.")
+        # Standard smolagents behaviour: a freshly-built CodeAgent starts
+        # with empty memory (agent.memory.steps == []). This only happens
+        # on first use in this tab, or after a model switch/reset — see
+        # agent_memory.py's module docstring for why this app no longer
+        # tries to restore memory from a previous model or app session.
         return _general_agent
 
 
