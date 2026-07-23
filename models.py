@@ -18,6 +18,8 @@ from hardware import DEVICE, TORCH_DTYPE
 from i18n import LANGUAGES
 
 _embed_model         = None
+_embed_model_id      = None
+_embed_lock          = threading.Lock()
 _chroma_col          = None
 _llm                 = None
 _llm_model_id        = mr.DEFAULT_LLM_MODEL
@@ -143,6 +145,18 @@ def _release_model(obj):
     """
     if obj is None:
         return
+
+    # llama-server (external process) backend: LlamaServerModel has no
+    # in-process model/KV-cache to release at all — the real memory lives
+    # in the separate llama-server subprocess. "Releasing" this object
+    # means stopping that subprocess, not any of the torch/llama.cpp
+    # cleanup below (which doesn't apply — there's no `.llm`/`.model`
+    # attribute holding real weights in this Python process).
+    if isinstance(obj, llama_backend.LlamaServerModel):
+        llama_backend.stop_llama_server()
+        del obj
+        return
+
     try:
         # llama.cpp backend: LlamaCppModel wraps the native llama_cpp.Llama
         # instance as `.llm` — close it explicitly to free the KV-cache /
@@ -178,13 +192,80 @@ def _release_model(obj):
         pass
 
 
-def get_embed_model():
-    global _embed_model
-    if _embed_model is None:
-        print(f"[RAG] Loading embedding model '{mr.DEFAULT_EMBED_MODEL}' on {DEVICE.upper()} …")
+def get_embed_model(model_id: Optional[str] = None):
+    """Lazily build (or rebuild, if the model id changed) the shared
+    embedding model instance.
+
+    `model_id` lets the "🧩 Embedding Model" control on the Knowledge Base
+    tab (see ui.py) switch models at runtime, the same way get_llm()/
+    get_vlm() already do for their tabs. If not given, falls back to
+    whatever embedding model was last loaded, or — on first call —
+    model_registry.get_default_embed_model() (persisted override, or the
+    hardware-tier recommendation).
+
+    IMPORTANT: switching to a DIFFERENT embedding model does NOT re-embed
+    anything already stored in ChromaDB. Vectors from two different
+    embedding models are not comparable, and ChromaDB locks a collection
+    to whatever dimension it was first created with — so switching after
+    documents are already indexed will make retrieval fail with a
+    dimension-mismatch error (see knowledge_base.retrieve_context()'s
+    friendlier error for this) until you either switch back to the
+    original embedding model, or clear the index and re-index everything
+    with the new one. ui.py's embedding-model "Load" button warns about
+    this before switching.
+    """
+    global _embed_model, _embed_model_id
+    target = model_id or _embed_model_id or mr.DEFAULT_EMBED_MODEL
+
+    if _embed_model is not None and target == _embed_model_id:
+        return _embed_model
+
+    with _embed_lock:
+        if _embed_model is not None and target == _embed_model_id:
+            return _embed_model
+
+        if _embed_model is not None:
+            print(f"[RAG] Unloading previous embedding model '{_embed_model_id}' before loading '{target}' …")
+            _release_model(_embed_model)
+            _embed_model = None
+
+        print(f"[RAG] Loading embedding model '{target}' on {DEVICE.upper()} …")
         from sentence_transformers import SentenceTransformer
-        _embed_model = SentenceTransformer(mr.DEFAULT_EMBED_MODEL, device=DEVICE)
-    return _embed_model
+        try:
+            # jina-embeddings-v4 needs trust_remote_code=True; harmless
+            # for BGE-M3/Qwen3-Embedding-4B, which don't require it.
+            _embed_model = SentenceTransformer(target, device=DEVICE, trust_remote_code=True)
+        except TypeError:
+            # Older sentence-transformers releases may not accept this kwarg.
+            _embed_model = SentenceTransformer(target, device=DEVICE)
+        _embed_model_id = target
+        return _embed_model
+
+
+def force_reload_embed_model(target_model_id: str):
+    """Used by the Knowledge Base tab's "🧩 Embedding Model" Load button:
+    fully release whatever embedding model is currently loaded (regardless
+    of id) and load `target_model_id` fresh — mirrors force_reload_llm()/
+    force_reload_vlm()/force_reload_stt()."""
+    global _embed_model, _embed_model_id
+    _release_model(_embed_model)
+    _embed_model = None
+    _embed_model_id = None
+    return get_embed_model(target_model_id)
+
+
+def unload_embed_model_fn(lang_key: str = "kh") -> str:
+    """Explicit "force unload from VRAM" action for the embedding model —
+    mirrors unload_llm_fn()/unload_vlm_fn()/unload_stt_fn()."""
+    global _embed_model, _embed_model_id
+    l = LANGUAGES.get(lang_key, LANGUAGES["kh"])
+    if _embed_model is None:
+        return l["btn_unload_none"]
+    mid = _embed_model_id
+    _release_model(_embed_model)
+    _embed_model = None
+    _embed_model_id = None
+    return l["msg_unloaded"].format(model=mid)
 
 
 def encode_texts(texts: list, normalize: bool = True):
@@ -266,49 +347,78 @@ def get_llm(model_id: Optional[str] = None, n_ctx: Optional[int] = None):
             _llm = None
 
         if is_gguf:
-            if not llama_backend.LLAMA_CPP_AVAILABLE:
-                raise RuntimeError(
-                    "llama-cpp-python is not installed. Run SETUP.bat to install "
-                    "a hardware-matched build, or install it manually with the "
-                    "appropriate CUDA/Metal/ROCm build flags for GPU support."
-                )
-            print(f"[RAG] Loading GGUF LLM '{target}' with context window "
-                  f"{target_ctx} tokens on {DEVICE.upper()} …")
-            try:
-                _llm = llama_backend.LlamaCppModel(
+            # Which backend actually RUNS this .gguf file — in-process
+            # (llama-cpp-python, the original default) or an external
+            # `llama-server` process talked to over HTTP. See
+            # model_registry.LLM_BACKEND_MODE_OPTIONS / the "⚙️ LLM
+            # Backend" dropdown in the UI. Only affects HOW the model
+            # runs, not which .gguf file/folder it comes from.
+            backend_mode = mr.get_saved_llm_backend_mode()
+
+            if backend_mode == "server":
+                print(f"[RAG] Starting/reusing llama-server for '{target}' with "
+                      f"context window {target_ctx} tokens …")
+                base_url = llama_backend.get_or_start_llama_server(
                     model_path=target,
                     n_ctx=target_ctx,
-                    # -1 offloads every layer to GPU; on a CPU-only llama-cpp-python
-                    # build this is harmless (llama.cpp silently ignores it and runs
-                    # on CPU), but we set 0 explicitly once we know for sure so the
-                    # load logs are accurate instead of claiming a GPU offload that
-                    # won't happen.
                     n_gpu_layers=-1 if llama_backend.LLAMA_CPP_GPU_AVAILABLE else 0,
-                    # Flash attention only helps (and is only reliably supported)
-                    # when the model is actually running on GPU; LlamaCppModel
-                    # itself also falls back gracefully if a specific model's
-                    # architecture rejects FA even when the GPU build supports it.
-                    flash_attn=llama_backend.LLAMA_CPP_GPU_AVAILABLE,
+                )
+                _llm = llama_backend.LlamaServerModel(
+                    base_url=base_url,
+                    model_path=target,
                     temperature=0.6,
                     top_p=0.95,
                     max_new_tokens=mr.MAX_NEW_TOKENS,
                 )
-            except Exception as e:
-                # A larger n_ctx needs a proportionally larger KV-cache —
-                # on GPU this can OOM even when a smaller context window
-                # for the exact same model loaded fine. Make that
-                # connection explicit instead of leaving the user to
-                # guess from a raw allocation-failure message.
-                if target_ctx > 16384 and ("memory" in str(e).lower() or "alloc" in str(e).lower()):
+                _llm_n_ctx = target_ctx
+
+            else:
+                if not llama_backend.LLAMA_CPP_AVAILABLE:
                     raise RuntimeError(
-                        f"Failed to load '{target}' with a {target_ctx}-token context "
-                        f"window — this likely ran out of VRAM/RAM, since the KV-cache "
-                        f"size grows with n_ctx. Try a smaller context window from the "
-                        f"'🧠 Context Window' dropdown, or a smaller/more-quantized model.\n\n"
-                        f"Original error: {e}"
-                    ) from e
-                raise
-            _llm_n_ctx = target_ctx
+                        "llama-cpp-python is not installed. Run SETUP.bat to install "
+                        "a hardware-matched build, or install it manually with the "
+                        "appropriate CUDA/Metal/ROCm build flags for GPU support — "
+                        "or switch the '⚙️ LLM Backend' dropdown to 'llama-server "
+                        "(external process)' instead, which only needs a "
+                        "llama-server executable, not llama-cpp-python."
+                    )
+                print(f"[RAG] Loading GGUF LLM '{target}' with context window "
+                      f"{target_ctx} tokens on {DEVICE.upper()} …")
+                try:
+                    _llm = llama_backend.LlamaCppModel(
+                        model_path=target,
+                        n_ctx=target_ctx,
+                        # -1 offloads every layer to GPU; on a CPU-only llama-cpp-python
+                        # build this is harmless (llama.cpp silently ignores it and runs
+                        # on CPU), but we set 0 explicitly once we know for sure so the
+                        # load logs are accurate instead of claiming a GPU offload that
+                        # won't happen.
+                        n_gpu_layers=-1 if llama_backend.LLAMA_CPP_GPU_AVAILABLE else 0,
+                        # Flash attention only helps (and is only reliably supported)
+                        # when the model is actually running on GPU; LlamaCppModel
+                        # itself also falls back gracefully if a specific model's
+                        # architecture rejects FA even when the GPU build supports it.
+                        flash_attn=llama_backend.LLAMA_CPP_GPU_AVAILABLE,
+                        temperature=0.6,
+                        top_p=0.95,
+                        max_new_tokens=mr.MAX_NEW_TOKENS,
+                    )
+                except Exception as e:
+                    # A larger n_ctx needs a proportionally larger KV-cache —
+                    # on GPU this can OOM even when a smaller context window
+                    # for the exact same model loaded fine. Make that
+                    # connection explicit instead of leaving the user to
+                    # guess from a raw allocation-failure message.
+                    if target_ctx > 16384 and ("memory" in str(e).lower() or "alloc" in str(e).lower()):
+                        raise RuntimeError(
+                            f"Failed to load '{target}' with a {target_ctx}-token context "
+                            f"window — this likely ran out of VRAM/RAM, since the KV-cache "
+                            f"size grows with n_ctx. Try a smaller context window from the "
+                            f"'🧠 Context Window' dropdown, or a smaller/more-quantized model.\n\n"
+                            f"Original error: {e}"
+                        ) from e
+                    raise
+                _llm_n_ctx = target_ctx
         else:
             _check_transformers_version_for(target)
             import inspect

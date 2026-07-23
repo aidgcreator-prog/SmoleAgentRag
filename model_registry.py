@@ -81,6 +81,33 @@ def set_embed_model(model_id: str) -> None:
     user_config.save_user_config({"embed_model": model_id})
 
 
+def get_default_embed_label() -> str:
+    """Reverse-lookup the dropdown label matching the currently active
+    embedding model id (persisted override, or the hardware-tier
+    recommendation if nothing was ever saved) — mirrors
+    get_saved_context_window_label()'s pattern. Used to initialize the
+    UI's "🧩 Embedding Model" dropdown to the right value on load."""
+    current = get_default_embed_model()
+    for label, model_id in EMBED_OPTIONS.items():
+        if model_id == current:
+            return label
+    return next(iter(EMBED_OPTIONS.keys()))
+
+
+# Best-effort vector dimensions for each EMBED_OPTIONS entry — used only
+# to make the UI's switch-embedding-model warning more concrete (telling
+# the user the actual before/after dimensions instead of just "they might
+# differ"). NOT used to block or validate anything: if a future model's
+# real dimension differs from what's listed here, knowledge_base.py's
+# actual runtime check (peeking at a real stored vector, and catching
+# ChromaDB's own dimension-mismatch error) is always the source of truth,
+# not this table.
+EMBED_MODEL_DIMENSIONS = {
+    "BAAI/bge-m3": 1024,
+    "Qwen/Qwen3-Embedding-4B": 2560,
+    "jinaai/jina-embeddings-v4": 2048,  # verify against the model card if this ever looks off
+}
+
 DEFAULT_EMBED_MODEL = get_default_embed_model()
 CHROMA_PERSIST_DIR  = "./chroma_db"
 VISUAL_INDEX_DIR    = "./visual_index"
@@ -150,6 +177,65 @@ def set_context_window(n_ctx: int) -> None:
     """Persist the chosen context window so it survives an app restart —
     mirrors llama_backend.set_model_dir()'s persistence pattern."""
     user_config.save_user_config({"context_window": int(n_ctx)})
+
+
+# ──────────────────────────────────────────────────────────────────
+# LLM backend mode for GGUF models — how a selected .gguf file is
+# actually RUN, independent of which .gguf file/folder it comes from:
+#
+#   "inprocess" — llama-cpp-python, loaded directly inside this Python
+#                 process (llama_backend.LlamaCppModel). The original,
+#                 default behaviour.
+#   "server"    — spawns/reuses an external `llama-server` executable
+#                 as a subprocess and talks to it over its OpenAI-
+#                 compatible HTTP API instead
+#                 (llama_backend.get_or_start_llama_server() /
+#                 LlamaServerModel). Needs a llama-server(.exe) binary
+#                 configured — see llama_backend.LLAMA_SERVER_EXE_PATH /
+#                 set_llama_server_exe_path().
+#
+# Only meaningful for .gguf models — HuggingFace/transformers models
+# always run in-process regardless of this setting. Persisted the same
+# way as the context window above, so the choice survives an app
+# restart; models.get_llm() reads this to decide which backend class to
+# build for a given GGUF model_id.
+# ──────────────────────────────────────────────────────────────────
+LLM_BACKEND_MODE_OPTIONS = {
+    "🧩 llama-cpp-python (in-process — default)": "inprocess",
+    "🖥️ llama-server (external process, OpenAI-compatible API)": "server",
+}
+DEFAULT_LLM_BACKEND_LABEL = "🧩 llama-cpp-python (in-process — default)"
+
+
+def get_saved_llm_backend_mode() -> str:
+    """Read the persisted GGUF backend mode ('inprocess' or 'server'),
+    falling back to 'inprocess' if nothing was ever saved or the saved
+    value isn't recognized — same "safe default wins" pattern as
+    get_saved_context_window()."""
+    saved = str(user_config.USER_CONFIG.get("llm_backend_mode", "inprocess"))
+    return saved if saved in LLM_BACKEND_MODE_OPTIONS.values() else "inprocess"
+
+
+def get_saved_llm_backend_label() -> str:
+    """Reverse-lookup the dropdown label matching the persisted backend
+    mode, for initializing the UI dropdown's value to whatever was saved
+    last time — mirrors get_saved_context_window_label()."""
+    saved = get_saved_llm_backend_mode()
+    for label, mode in LLM_BACKEND_MODE_OPTIONS.items():
+        if mode == saved:
+            return label
+    return DEFAULT_LLM_BACKEND_LABEL
+
+
+def set_llm_backend_mode(mode: str) -> None:
+    """Persist the chosen GGUF backend mode so it survives an app restart
+    — mirrors set_context_window()'s persistence pattern. Callers (see
+    ui.py) are responsible for resetting any cached agents/LLM instance
+    and stopping a running llama-server process afterward, since a
+    backend switch can't be hot-applied to an already-loaded model the
+    way most other settings can."""
+    mode = mode if mode in LLM_BACKEND_MODE_OPTIONS.values() else "inprocess"
+    user_config.save_user_config({"llm_backend_mode": mode})
 
 
 # ──────────────────────────────────────────────────────────────────

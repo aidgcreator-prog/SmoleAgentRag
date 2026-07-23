@@ -2,15 +2,39 @@
 llama_backend.py — Optional llama.cpp (GGUF) backend, alongside the
 HuggingFace/transformers backend used elsewhere in the app.
 
-If llama-cpp-python isn't installed, GGUF models simply won't show up in
-the model dropdowns — everything else keeps working.
+Two ways to actually RUN a GGUF model are supported:
+
+  1. In-process, via llama-cpp-python (LlamaCppModel) — the original,
+     default backend. The model is loaded directly inside this Python
+     process.
+  2. External process, via a real `llama-server` executable
+     (LlamaServerModel + get_or_start_llama_server()) — the app launches
+     (or reuses an already-running) `llama-server.exe` and talks to it
+     over its OpenAI-compatible HTTP API instead of loading the GGUF
+     file in-process. Useful for a custom/optimized llama-server build,
+     or for keeping a model warm independently of this Python process.
+
+Both backends share the SAME GGUF model folder (LLAMA_CPP_MODEL_DIR
+below) and the same discovery functions — the backend choice only
+changes HOW a selected .gguf file is actually run, not where models are
+found. Which backend is active is controlled by model_registry.py's
+"⚙️ LLM Backend" setting (get_saved_llm_backend_mode()).
+
+If llama-cpp-python isn't installed AND no llama-server executable is
+configured, GGUF models simply won't be runnable — everything else
+(HuggingFace models, the rest of the app) keeps working.
 """
 
+import atexit
 import contextlib
 import os
 import re
+import shlex
+import socket
+import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -495,6 +519,332 @@ class LlamaCppModel:
         return self.generate(messages, stop_sequences=stop_sequences, **kwargs)
 
 
+# ──────────────────────────────────────────────────────────────────
+# llama-server (external process) backend — an ALTERNATIVE to the
+# in-process LlamaCppModel above. Launches the real llama.cpp
+# `llama-server` binary as a subprocess (it exposes an OpenAI-compatible
+# HTTP API) and talks to it over HTTP instead of loading the GGUF file
+# directly inside this Python process via llama-cpp-python.
+#
+# Why offer this at all, given LlamaCppModel already works in-process:
+#   - Lets you point at a self-built / hand-optimized llama-server.exe
+#     (e.g. a custom CMake build with flags llama-cpp-python's own
+#     build doesn't expose, or a newer llama.cpp checkout than whatever
+#     llama-cpp-python happens to vendor) without needing a matching
+#     Python wheel at all.
+#   - Doesn't require llama-cpp-python to be installed/working in this
+#     Python environment — only a working llama-server executable.
+#   - The server process is independent of this Python process — useful
+#     if you want to keep a model warm across app restarts, or share one
+#     loaded model between this app and another tool that also speaks
+#     the OpenAI chat-completions API.
+#
+# This is purely an alternate way of RUNNING a model already discovered
+# by discover_gguf_models() above — it reuses the exact same
+# LLAMA_CPP_MODEL_DIR folder and .gguf file paths, it is NOT a separate
+# model source. Which backend actually gets used for a given GGUF model
+# is controlled by model_registry.get_saved_llm_backend_mode() (an
+# "⚙️ LLM Backend" dropdown in the UI) and dispatched in models.get_llm().
+#
+# Neither the exe path nor extra CLI flags are hardcoded — both are
+# user-configurable (env var override -> persisted user_config.json ->
+# empty/disabled), mirroring LLAMA_CPP_MODEL_DIR's own resolution order.
+# ──────────────────────────────────────────────────────────────────
+LLAMA_SERVER_EXE_PATH = (
+    os.environ.get("LLAMA_SERVER_EXE", "").strip()
+    or str(user_config.USER_CONFIG.get("llama_server_exe_path", "")).strip()
+)
+LLAMA_SERVER_HOST = "127.0.0.1"
+LLAMA_SERVER_DEFAULT_PORT = int(user_config.USER_CONFIG.get("llama_server_port", 8080) or 8080)
+
+# Extra CLI flags the user wants appended to every `llama-server` launch
+# (e.g. "--flash-attn --parallel 2 --slots") — free-text, persisted,
+# entirely optional. Split with shlex so quoted values work as expected.
+LLAMA_SERVER_EXTRA_ARGS = str(user_config.USER_CONFIG.get("llama_server_extra_args", "")).strip()
+
+# The single managed llama-server subprocess (this app only ever runs one
+# at a time — switching model/context/backend stops the old one first).
+_llama_server_proc: Optional[subprocess.Popen] = None
+_llama_server_config: dict = {}   # the exact (model_path, n_ctx, n_gpu_layers, port) currently running
+
+
+def set_llama_server_exe_path(exe_path: str) -> None:
+    """Persist the user-chosen path to llama-server(.exe) — mirrors
+    set_model_dir()'s persistence pattern exactly. An empty path simply
+    disables the server backend (get_or_start_llama_server() will raise a
+    clear, actionable error if selected without a path configured)."""
+    global LLAMA_SERVER_EXE_PATH
+    exe_path = (exe_path or "").strip()
+    LLAMA_SERVER_EXE_PATH = exe_path
+    user_config.save_user_config({"llama_server_exe_path": exe_path})
+
+
+def set_llama_server_extra_args(args_str: str) -> None:
+    """Persist free-text extra CLI flags appended to every llama-server
+    launch (e.g. '--flash-attn --parallel 2')."""
+    global LLAMA_SERVER_EXTRA_ARGS
+    args_str = (args_str or "").strip()
+    LLAMA_SERVER_EXTRA_ARGS = args_str
+    user_config.save_user_config({"llama_server_extra_args": args_str})
+
+
+def set_llama_server_port(port: int) -> None:
+    """Persist the preferred port llama-server should listen on. If it's
+    already taken, get_or_start_llama_server() automatically probes the
+    next free port instead of failing outright."""
+    global LLAMA_SERVER_DEFAULT_PORT
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return
+    LLAMA_SERVER_DEFAULT_PORT = port
+    user_config.save_user_config({"llama_server_port": port})
+
+
+def _port_is_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex((LLAMA_SERVER_HOST, port)) != 0
+
+
+def _find_free_port(preferred: int) -> int:
+    port = preferred
+    for _ in range(50):
+        if _port_is_free(port):
+            return port
+        port += 1
+    return preferred  # give up gracefully; the launch itself will fail loudly if it's really taken
+
+
+def _server_health_ok(port: int, timeout: float = 1.5) -> bool:
+    try:
+        import requests
+        r = requests.get(f"http://{LLAMA_SERVER_HOST}:{port}/health", timeout=timeout)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def is_llama_server_running() -> bool:
+    """Best-effort: is the managed llama-server subprocess currently alive
+    and healthy? Used by the UI to show live status."""
+    return (_llama_server_proc is not None and _llama_server_proc.poll() is None
+            and bool(_llama_server_config)
+            and _server_health_ok(_llama_server_config.get("port", LLAMA_SERVER_DEFAULT_PORT)))
+
+
+def get_llama_server_status() -> dict:
+    """Small dict describing the current managed llama-server process
+    (empty config if nothing is running) — for the UI status line."""
+    running = is_llama_server_running()
+    return {"running": running, **(_llama_server_config if running else {})}
+
+
+def stop_llama_server() -> None:
+    """Terminate the managed llama-server subprocess, if one is running.
+    Safe to call even if nothing is running — every caller that switches
+    model/context/backend calls this first (mirrors models._release_model()
+    freeing the in-process model before loading a replacement)."""
+    global _llama_server_proc, _llama_server_config
+    if _llama_server_proc is not None:
+        print("[llama-server] Stopping subprocess …")
+        try:
+            _llama_server_proc.terminate()
+            try:
+                _llama_server_proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                _llama_server_proc.kill()
+        except Exception:
+            pass
+    _llama_server_proc = None
+    _llama_server_config = {}
+
+
+# Never leave an orphaned llama-server.exe running in the background after
+# this app's own process exits (Ctrl+C, window close, crash, etc).
+atexit.register(stop_llama_server)
+
+
+def get_or_start_llama_server(model_path: str, n_ctx: int = 16384,
+                               n_gpu_layers: int = -1, port: Optional[int] = None,
+                               startup_timeout: int = 180) -> str:
+    """Ensure a llama-server process is running with this exact
+    (model_path, n_ctx, n_gpu_layers) config, launching/relaunching it if
+    needed, and return its base URL (e.g. 'http://127.0.0.1:8080').
+
+    Reuses the already-running process untouched if the requested config
+    matches exactly and it's still alive and healthy — restarting a
+    multi-GB GGUF load on every single chat turn would be far too slow.
+    Any config change (different model, different n_ctx, different
+    n_gpu_layers, ...) stops the old process and starts a fresh one,
+    mirroring models.get_llm()'s own "reload on config change" behaviour
+    for the in-process backend.
+    """
+    global _llama_server_proc, _llama_server_config
+
+    if not LLAMA_SERVER_EXE_PATH:
+        raise RuntimeError(
+            "No llama-server executable is configured. Set its path in the "
+            "'🖥️ llama-server.exe Path' box in the UI (or the "
+            "LLAMA_SERVER_EXE environment variable) before selecting the "
+            "'llama-server (external process)' backend."
+        )
+    exe = Path(LLAMA_SERVER_EXE_PATH)
+    if not exe.exists():
+        raise RuntimeError(
+            f"llama-server executable not found at '{exe}'. Double-check "
+            f"the '🖥️ llama-server.exe Path' box — it must point directly "
+            f"at the llama-server(.exe) binary, e.g. from "
+            f"https://github.com/ggml-org/llama.cpp/releases."
+        )
+
+    target_port = port or LLAMA_SERVER_DEFAULT_PORT
+    wanted = {"model_path": model_path, "n_ctx": n_ctx,
+              "n_gpu_layers": n_gpu_layers, "port": target_port}
+
+    if (_llama_server_proc is not None and _llama_server_proc.poll() is None
+            and _llama_server_config.get("model_path") == wanted["model_path"]
+            and _llama_server_config.get("n_ctx") == wanted["n_ctx"]
+            and _llama_server_config.get("n_gpu_layers") == wanted["n_gpu_layers"]
+            and _server_health_ok(_llama_server_config.get("port", target_port))):
+        return f"http://{LLAMA_SERVER_HOST}:{_llama_server_config['port']}"
+
+    # Config changed, or nothing running / it died — (re)launch.
+    stop_llama_server()
+
+    if not _port_is_free(target_port):
+        target_port = _find_free_port(target_port)
+        wanted["port"] = target_port
+
+    cmd = [
+        str(exe),
+        "-m", model_path,
+        "-c", str(n_ctx),
+        "--host", LLAMA_SERVER_HOST,
+        "--port", str(target_port),
+        "-ngl", str(n_gpu_layers if n_gpu_layers is not None else -1),
+    ]
+    if LLAMA_SERVER_EXTRA_ARGS:
+        cmd.extend(shlex.split(LLAMA_SERVER_EXTRA_ARGS))
+
+    print(f"[llama-server] Launching: {' '.join(cmd)}")
+    _llama_server_proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    _llama_server_config = wanted
+
+    deadline = time.time() + startup_timeout
+    tail_lines = []
+    while time.time() < deadline:
+        if _llama_server_proc.poll() is not None:
+            # Process already exited — something went wrong immediately
+            # (bad model path, unsupported GPU flags, port conflict the
+            # free-port probe above somehow missed, etc). Surface the
+            # real llama-server console output instead of a bare
+            # "connection refused" a moment later.
+            if _llama_server_proc.stdout:
+                try:
+                    tail_lines = _llama_server_proc.stdout.readlines()[-30:]
+                except Exception:
+                    tail_lines = []
+            _llama_server_proc = None
+            _llama_server_config = {}
+            raise RuntimeError(
+                f"llama-server exited immediately (check the model path, "
+                f"and that this build supports your GPU/CPU). Last output:\n"
+                f"{''.join(tail_lines)}"
+            )
+        if _server_health_ok(target_port):
+            print(f"[llama-server] Ready — http://{LLAMA_SERVER_HOST}:{target_port}")
+            return f"http://{LLAMA_SERVER_HOST}:{target_port}"
+        time.sleep(0.5)
+
+    # Timed out without ever reporting healthy — clean up rather than
+    # leaving a half-started process running in the background.
+    stop_llama_server()
+    raise RuntimeError(
+        f"llama-server did not report healthy within {startup_timeout}s — "
+        f"a very large model or a slow CPU-only load may just need more "
+        f"time; try again, or check the console output for the real error."
+    )
+
+
+class LlamaServerModel:
+    """smolagents-compatible Model wrapper that talks HTTP to an
+    already-running (or lazily-started via get_or_start_llama_server())
+    llama-server process, instead of loading the GGUF file in-process the
+    way LlamaCppModel above does. Satisfies the same minimal smolagents
+    Model contract: callable/`generate()`, returning an object with a
+    `.content` attribute — so it's a drop-in alternative wherever
+    LlamaCppModel is used (CodeAgent, TransformersModel-style direct
+    calls, etc).
+    """
+
+    def __init__(self, base_url: str, model_path: str, temperature: float = 0.6,
+                 top_p: float = 0.95, max_new_tokens: int = 512, timeout: int = 300):
+        self.model_id = model_path
+        self.model_path = model_path
+        self.base_url = base_url.rstrip("/")
+        self.temperature = temperature
+        self.top_p = top_p
+        self.max_new_tokens = max_new_tokens
+        self.timeout = timeout
+
+    @staticmethod
+    def _flatten_content(content) -> str:
+        return LlamaCppModel._flatten_content(content)
+
+    def _to_plain_messages(self, messages: list) -> list:
+        # Reuses LlamaCppModel's exact role-normalization / "ensure at
+        # least one user turn" logic — the same replayed-memory edge
+        # cases (see LlamaCppModel._to_plain_messages' docstring) apply
+        # here regardless of which backend actually runs the model.
+        return LlamaCppModel._to_plain_messages(self, messages)
+
+    def generate(self, messages: list, stop_sequences: Optional[list] = None, **kwargs):
+        from smolagents.models import ChatMessage
+        import requests
+
+        plain_messages = self._to_plain_messages(messages)
+        payload = {
+            "model": self.model_path,
+            "messages": plain_messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "top_p": kwargs.get("top_p", self.top_p),
+            "max_tokens": kwargs.get("max_tokens", self.max_new_tokens),
+        }
+        if stop_sequences:
+            payload["stop"] = stop_sequences
+
+        try:
+            resp = requests.post(f"{self.base_url}/v1/chat/completions",
+                                  json=payload, timeout=self.timeout)
+            resp.raise_for_status()
+            text = resp.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            # Same "surface as assistant text, don't crash the whole
+            # chat/agent turn" approach as LlamaCppModel.generate()'s
+            # ValueError handler above — a transient HTTP hiccup (server
+            # still warming up, connection reset, malformed response)
+            # shouldn't take down the whole tab.
+            return ChatMessage(
+                role="assistant",
+                content=(
+                    f"⚠️ llama-server request failed ({self.base_url}): {e}\n\n"
+                    f"If this keeps happening, check that llama-server is "
+                    f"still running (see the '🖥️ llama-server.exe Path' "
+                    f"section), or switch the '⚙️ LLM Backend' dropdown back "
+                    f"to the in-process llama-cpp-python backend."
+                ),
+            )
+
+        text = LlamaCppModel._sanitize_content(text)
+        return ChatMessage(role="assistant", content=text)
+
+    # smolagents Model instances are called directly in some code paths
+    def __call__(self, messages: list, stop_sequences: Optional[list] = None, **kwargs):
+        return self.generate(messages, stop_sequences=stop_sequences, **kwargs)
+
+
 class LlamaCppVLMModel:
     """Loader/wrapper for GGUF vision-language models via llama.cpp's
     multimodal support.
@@ -515,6 +865,12 @@ class LlamaCppVLMModel:
     but can produce poor answers, since it feeds the model the wrong
     image-token/prompt format — if that happens, check whether a newer
     llama-cpp-python ships a more specific handler for that model family.
+
+    NOTE: this VLM path stays on the in-process llama-cpp-python backend
+    only — GGUF vision models are not (yet) routed through
+    LlamaServerModel/get_or_start_llama_server() above, since llama-server's
+    own multimodal HTTP API varies more across builds than the plain
+    text chat-completions endpoint LlamaServerModel relies on.
     """
 
     # Filename substring -> chat_handler class name in

@@ -10,6 +10,15 @@
 
 ចំណុចប្រទាក់អាចប្តូរភាសាបានភ្លាមៗ (**ខ្មែរ** ⇄ **អង់គ្លេស**) នៅជ្រុងខាងលើស្តាំ។ ផ្ទាំង **ℹ️ អំពីកម្មវិធី** បង្ហាញព័ត៌មានទាំងពីរភាសាជានិច្ច (ខ្មែរខាងលើ អង់គ្លេសខាងក្រោម) ដោយមិនអាស្រ័យលើបញ្ជីទម្លាក់ភាសានោះទេ។
 
+### 🆕 អ្វីដែលថ្មីក្នុងកំណែនេះ
+
+- **🔬 ផ្ទាំង Deep Research ថ្មី**៖ agent គ្រប់គ្រង + agent ស្វែងរកតាមអ៊ីនធឺណិតដាច់ដោយឡែក បំបែកសំណួរជាសំណួររង រៀបចំផែនការឡើងវិញឥតឈប់ឈរ (`planning_interval`) រួចសរសេររបាយការណ៍ Markdown ដែលមានប្រភពយោងផ្ទៀងផ្ទាត់
+- **ម៉ូដែលថ្មី**៖ គាំទ្រគ្រួសារ **Gemma 4** (E2B/12B/26B-A4B/31B, អាជ្ញាប័ណ្ណ Apache 2.0) និង **Qwen3.6** (27B dense / 35B-A3B MoE) — ត្រូវការ `transformers` កំណែថ្មីជាងមុន (សូមមើលតារាង Text LLMs ខាងក្រោម)
+- **🧠 ចងចាំការសន្ទនា (Conversation Memory — កំពុងសាកល្បង)**៖ ប្រអប់ថ្មីនៅគ្រប់ផ្ទាំង agentic អនុញ្ញាតឱ្យសំណួរបន្តអាចយោងលើអ្វីដែលបាននិយាយពីមុន (RAM-only មិនរក្សាទុកទៅថាសទេ)
+- **🧠 វិន្ដូបរិបទ (Context Window) ដែលកំណត់បានតាមចិត្ត**៖ ជ្រើសរើសពី 4K ដល់ 128K សម្រាប់ម៉ូដែល GGUF ដោយផ្ទាល់ក្នុង UI
+- **ការរកឃើញ GPU មិនត្រូវគ្នា**៖ បង្ហាញការព្រមានច្បាស់លាស់ក្នុង UI ប្រសិនបើ GPU ចាស់ (ឧ. Pascal/sm_6x) មិនត្រូវបានគាំទ្រដោយ PyTorch build បច្ចុប្បន្ន ជំនួសឱ្យការគាំងស្ងាត់ៗ
+- **Data Analysis Agent** ឥឡូវអាចដំឡើង Python package ខ្វះខាតដោយខ្លួនឯង (`install_package` tool) ហើយធ្វើ EDA ពេញលេញជាមួយក្រាហ្វិកច្រើន
+
 ### 📑 មាតិកា
 - [ស្ថាបត្យកម្ម](#️-ស្ថាបត្យកម្ម)
 - [ការចាប់ផ្តើមរហ័ស](#-ការចាប់ផ្តើមរហ័ស)
@@ -243,6 +252,15 @@ python app.py
 A local, multipurpose AI assistant built by **LocalAiLab** with [smolagents](https://github.com/huggingface/smolagents), featuring a Gradio UI, general chat, document RAG (Retrieval-Augmented Generation) with persistent ChromaDB storage, multi-modal capabilities (Vision/VLM), Speech-to-Text transcription, and AI-driven CSV/Excel data analysis. It automatically detects and uses your GPU (CUDA, AMD, or Mac MPS) if available, falling back to CPU otherwise. Besides the default HuggingFace/transformers models, the app can also run local **GGUF models via llama.cpp**.
 
 The UI is fully bilingual — switch between **Khmer** and **English** instantly using the language dropdown in the top-right corner. The **ℹ️ About** tab always shows both languages (Khmer above, English below), regardless of that dropdown.
+
+### 🆕 What's New in This Release
+
+- **🔬 New Deep Research tab**: a manager agent + a dedicated web-search sub-agent break a question into sub-questions, periodically re-plan (`planning_interval`), and write a verified, sourced Markdown report
+- **New models**: added the **Gemma 4** family (E2B/12B/26B-A4B/31B, now Apache 2.0-licensed) and the **Qwen3.6** family (27B dense / 35B-A3B MoE) — both need a newer `transformers` release (see the Text LLMs table below)
+- **🧠 Conversation Memory (Experimental)**: a new toggle on every agentic tab lets follow-up questions refer back to earlier turns (RAM-only, never persisted to disk)
+- **🧠 Configurable Context Window**: pick anywhere from 4K to 128K tokens for GGUF models directly in the UI
+- **GPU-incompatibility detection**: the UI now shows a clear warning if a detected GPU (e.g. an older Pascal/sm_6x card) isn't supported by the installed PyTorch build, instead of silently falling back to CPU with no explanation
+- **Data Analysis agent** can now install missing Python packages itself (`install_package` tool) and runs a fuller EDA with multiple charts
 
 ### 📑 Table of Contents
 - [Architecture](#️-architecture)

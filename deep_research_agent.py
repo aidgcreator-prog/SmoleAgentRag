@@ -44,8 +44,60 @@ import general_agent
 import model_registry as mr
 import models
 
+try:
+    import playwright_search_tool
+    _playwright_available = True
+except ImportError:
+    _playwright_available = False
+
+if _playwright_available:
+    class TrackedPlaywrightDuckDuckGoSearchTool(playwright_search_tool.PlaywrightDuckDuckGoSearchTool):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.queries_run = []
+            self.result_links = []
+
+        def forward(self, query: str) -> str:
+            self.queries_run.append(query)
+            result = super().forward(query)
+            import re
+            _MARKDOWN_LINK_RE = re.compile(r'\[([^\]]+)\]\((https?://[^\s\)]+)\)')
+            for title, url in _MARKDOWN_LINK_RE.findall(result or ""):
+                pair = (title.strip(), url.strip())
+                if pair not in self.result_links:
+                    self.result_links.append(pair)
+            return result
+
+    class TrackedPlaywrightGoogleSearchTool(playwright_search_tool.PlaywrightGoogleSearchTool):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.queries_run = []
+            self.result_links = []
+
+        def forward(self, query: str, filter_year: str | None = None) -> str:
+            self.queries_run.append(query)
+            result = super().forward(query, filter_year)
+            import re
+            _MARKDOWN_LINK_RE = re.compile(r'\[([^\]]+)\]\((https?://[^\s\)]+)\)')
+            for title, url in _MARKDOWN_LINK_RE.findall(result or ""):
+                pair = (title.strip(), url.strip())
+                if pair not in self.result_links:
+                    self.result_links.append(pair)
+            return result
+
+    class TrackedPlaywrightVisitPageTool(playwright_search_tool.PlaywrightVisitPageTool):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.urls_visited = []
+
+        def forward(self, url: str) -> str:
+            self.urls_visited.append(url)
+            return super().forward(url)
+
+
 _manager_agent          = None
 _manager_agent_model_id = None
+_manager_agent_config   = {}
 _manager_agent_lock     = threading.Lock()
 
 # Module-level refs to the CURRENT run's tracked-tool instances (the
@@ -122,38 +174,97 @@ DEEP_RESEARCH_INSTRUCTIONS = (
 )
 
 
-def _build_search_agent(llm, model_id: str = "") -> CodeAgent:
+def build_task_with_citation_reminder(user_message: str) -> str:
+    """Wrap the user's question with an explicit, PER-TASK reminder of the
+    citation requirement — mirrors general_agent.build_task_with_citation_reminder()
+    and rag_agent.build_strict_task()'s belt-and-braces pattern exactly.
+
+    DEEP_RESEARCH_INSTRUCTIONS (including its citation requirement) is
+    only ever attached to the manager agent if this installed smolagents
+    version's CodeAgent.__init__ happens to expose an `instructions=`
+    parameter — see the `if "instructions" in params:` guard in
+    _build_manager_agent() below. On a version where it doesn't, the
+    manager never sees the citation requirement at all, so it never
+    writes a '### References' section for
+    general_agent.resolve_actually_used_sources() to parse in chat.py's
+    chat_deep_research(), even after a run that genuinely delegated
+    several web_search_agent calls. Repeating the requirement here — in
+    the per-call task text, which always reaches the manager regardless
+    of smolagents version — closes that gap.
+    """
+    return (
+        f"{user_message}\n\n"
+        "---\n"
+        "Reminder: every factual claim in your final report that came "
+        "from a web_search_agent call must be cited in-text with a "
+        "bracketed number (e.g. [1]) placed right after the claim, and "
+        "your final answer must end with a '### References' section "
+        "listing each numbered source's title and URL, e.g.:\n"
+        "### References\n"
+        "[1] Page Title — https://example.com/page"
+    )
+
+
+def _build_search_agent(llm, model_id: str = "", use_playwright: bool = False, headless: bool = True, max_steps: Optional[int] = None, timeout: Optional[int] = None) -> CodeAgent:
     global _search_tool, _webpage_tool
-    _search_tool  = general_agent.TrackedDuckDuckGoSearchTool()
-    _webpage_tool = general_agent.TrackedVisitWebpageTool()
-    max_steps = mr.get_max_steps_for_model(model_id, SEARCH_AGENT_DEFAULT_MAX_STEPS)
+    
+    tools = []
+    if use_playwright and _playwright_available:
+        _search_tool = TrackedPlaywrightDuckDuckGoSearchTool(headless=headless)
+        _webpage_tool = TrackedPlaywrightVisitPageTool(headless=headless)
+        tools = [
+            _search_tool,
+            TrackedPlaywrightGoogleSearchTool(headless=headless),
+            _webpage_tool,
+            playwright_search_tool.PlaywrightExtractLegalDocumentLinksTool(headless=headless),
+            playwright_search_tool.PlaywrightReadEmbeddedPdfTool()
+        ]
+        desc = (
+            "Give this agent ONE focused sub-question (a plain-text string) and "
+            "it will search the web using Playwright headless browser tools and read pages to answer just that "
+            "sub-question, returning what it found as plain text. It has NO "
+            "memory of any other call you make to it, so every call must be "
+            "fully self-contained — include whatever context it needs in the "
+            "sub-question itself. Call it once per sub-question; don't ask it "
+            "multiple unrelated things in one call."
+        )
+    else:
+        _search_tool  = general_agent.TrackedDuckDuckGoSearchTool()
+        _webpage_tool = general_agent.TrackedVisitWebpageTool()
+        tools = [_search_tool, _webpage_tool]
+        desc = SEARCH_AGENT_DESCRIPTION
+
+    final_max_steps = max_steps if max_steps is not None else mr.get_max_steps_for_model(model_id, SEARCH_AGENT_DEFAULT_MAX_STEPS)
     kwargs = dict(
         model=llm,
-        tools=[_search_tool, _webpage_tool],
-        max_steps=max_steps,
+        tools=tools,
+        max_steps=final_max_steps,
         verbosity_level=1,
         name="web_search_agent",
-        description=SEARCH_AGENT_DESCRIPTION,
+        description=desc,
     )
     # Same markdown-fence compatibility switch used by every other agentic
     # tab in this app (general_agent.py / rag_agent.py / data_analysis.py)
     # — see those files' comments for why.
     try:
-        if "code_block_tags" in inspect.signature(CodeAgent.__init__).parameters:
+        params = inspect.signature(CodeAgent.__init__).parameters
+        if "code_block_tags" in params:
             kwargs["code_block_tags"] = "markdown"
+        if "executor_kwargs" in params and timeout is not None:
+            kwargs["executor_kwargs"] = {"timeout_seconds": timeout}
     except (TypeError, ValueError):
         pass
     return CodeAgent(**kwargs)
 
 
-def _build_manager_agent(llm, search_agent: CodeAgent, model_id: str = "") -> CodeAgent:
-    max_steps = mr.get_max_steps_for_model(model_id, MANAGER_DEFAULT_MAX_STEPS)
+def _build_manager_agent(llm, search_agent: CodeAgent, model_id: str = "", max_steps: Optional[int] = None, timeout: Optional[int] = None) -> CodeAgent:
+    final_max_steps = max_steps if max_steps is not None else mr.get_max_steps_for_model(model_id, MANAGER_DEFAULT_MAX_STEPS)
     kwargs = dict(
         model=llm,
         tools=[],
         managed_agents=[search_agent],
         planning_interval=DEEP_RESEARCH_PLANNING_INTERVAL,
-        max_steps=max_steps,
+        max_steps=final_max_steps,
         verbosity_level=1,
     )
     try:
@@ -162,6 +273,8 @@ def _build_manager_agent(llm, search_agent: CodeAgent, model_id: str = "") -> Co
             kwargs["code_block_tags"] = "markdown"
         if "instructions" in params:
             kwargs["instructions"] = DEEP_RESEARCH_INSTRUCTIONS
+        if "executor_kwargs" in params and timeout is not None:
+            kwargs["executor_kwargs"] = {"timeout_seconds": timeout}
     except (TypeError, ValueError):
         pass
     return CodeAgent(**kwargs)
@@ -189,24 +302,33 @@ def get_tool_usage() -> tuple:
     return queries, urls, links
 
 
-def get_deep_research_agent(model_id: Optional[str] = None):
+def get_deep_research_agent(model_id: Optional[str] = None, use_playwright: bool = False, headless: bool = True, manager_max_steps: Optional[int] = None, search_max_steps: Optional[int] = None, timeout: Optional[int] = None):
     """Lazily build (or rebuild, if the model changed) the manager agent
     and its search sub-agent."""
-    global _manager_agent, _manager_agent_model_id
+    global _manager_agent, _manager_agent_model_id, _manager_agent_config
     target = model_id or models._llm_model_id
 
-    if _manager_agent is not None and target == _manager_agent_model_id:
+    current_config = {
+        "use_playwright": use_playwright,
+        "headless": headless,
+        "manager_max_steps": manager_max_steps,
+        "search_max_steps": search_max_steps,
+        "timeout": timeout
+    }
+
+    if _manager_agent is not None and target == _manager_agent_model_id and current_config == _manager_agent_config:
         return _manager_agent
 
     with _manager_agent_lock:
-        if _manager_agent is not None and target == _manager_agent_model_id:
+        if _manager_agent is not None and target == _manager_agent_model_id and current_config == _manager_agent_config:
             return _manager_agent
 
-        print(f"[DeepResearch] Building manager + web_search_agent on '{target}' …")
+        print(f"[DeepResearch] Building manager + web_search_agent on '{target}' (Playwright: {use_playwright}, Headless: {headless}) …")
         llm = models.get_llm(target)
-        search_agent = _build_search_agent(llm, target)
-        _manager_agent = _build_manager_agent(llm, search_agent, target)
+        search_agent = _build_search_agent(llm, target, use_playwright, headless, search_max_steps, timeout)
+        _manager_agent = _build_manager_agent(llm, search_agent, target, manager_max_steps, timeout)
         _manager_agent_model_id = target
+        _manager_agent_config = current_config
         # Standard smolagents behaviour: a freshly-built agent starts with
         # empty memory (see agent_memory.py's module docstring for why
         # this app doesn't try to restore memory from a previous
@@ -220,8 +342,9 @@ def reset_agent():
     Call this whenever the Deep Research tab's model changes or the LLM
     is force-reloaded/unloaded elsewhere — mirrors general_agent.reset_agent().
     """
-    global _manager_agent, _manager_agent_model_id, _search_tool, _webpage_tool
+    global _manager_agent, _manager_agent_model_id, _manager_agent_config, _search_tool, _webpage_tool
     _manager_agent = None
     _manager_agent_model_id = None
+    _manager_agent_config = {}
     _search_tool = None
     _webpage_tool = None

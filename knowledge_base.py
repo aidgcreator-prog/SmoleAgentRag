@@ -49,6 +49,38 @@ def _safe_meta(meta: dict, chunk_index: int) -> dict:
     return safe
 
 
+_DIMENSION_MISMATCH_HINT = (
+    "The current embedding model doesn't match the one this knowledge "
+    "base was indexed with (vector dimension mismatch). Switch back to "
+    "the original embedding model in the 📂 Knowledge Base tab's "
+    "'🧩 Embedding Model' control, or clear the index (💥 Clear ALL) and "
+    "re-index your documents with the new embedding model."
+)
+
+
+def get_collection_embedding_dim() -> Optional[int]:
+    """Best-effort: return the vector dimension the CURRENT ChromaDB
+    collection was actually built with, by peeking at one stored
+    embedding. Returns None if the collection is empty — nothing to
+    compare against yet, so any embedding model is safe to switch to.
+
+    Used by the Knowledge Base tab's "🧩 Embedding Model" Load button to
+    warn the user BEFORE they switch, rather than only finding out the
+    hard way on the next query/index call.
+    """
+    col = models.get_chroma_collection()
+    if col.count() == 0:
+        return None
+    try:
+        peek = col.peek(limit=1)
+        vecs = peek.get("embeddings")
+        if vecs is not None and len(vecs) > 0:
+            return len(vecs[0])
+    except Exception:
+        pass
+    return None
+
+
 def index_texts(texts: list, metadatas: list) -> int:
     col = models.get_chroma_collection()
     all_chunks, all_metas, all_ids = [], [], []
@@ -62,8 +94,13 @@ def index_texts(texts: list, metadatas: list) -> int:
         return 0
     for i in range(0, len(all_chunks), 64):
         vecs = models.encode_texts(all_chunks[i:i+64])
-        col.upsert(embeddings=vecs, documents=all_chunks[i:i+64],
-                   metadatas=all_metas[i:i+64], ids=all_ids[i:i+64])
+        try:
+            col.upsert(embeddings=vecs, documents=all_chunks[i:i+64],
+                       metadatas=all_metas[i:i+64], ids=all_ids[i:i+64])
+        except Exception as e:
+            if "dimension" in str(e).lower():
+                raise RuntimeError(f"{_DIMENSION_MISMATCH_HINT}\n\nOriginal error: {e}") from e
+            raise
     return len(all_chunks)
 
 
@@ -320,8 +357,13 @@ def retrieve_context(query: str) -> tuple[str, list[str]]:
     col = models.get_chroma_collection()
     if col.count() == 0:
         return "", []
-    results = col.query(query_embeddings=models.encode_texts([query]),
-                        n_results=min(mr.TOP_K, col.count()))
+    try:
+        results = col.query(query_embeddings=models.encode_texts([query]),
+                            n_results=min(mr.TOP_K, col.count()))
+    except Exception as e:
+        if "dimension" in str(e).lower():
+            raise RuntimeError(f"{_DIMENSION_MISMATCH_HINT}\n\nOriginal error: {e}") from e
+        raise
     docs  = results["documents"][0]
     metas = results["metadatas"][0]
     if not docs:

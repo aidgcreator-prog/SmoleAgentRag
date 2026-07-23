@@ -156,8 +156,12 @@ def resolve_actually_used_sources(answer: str, urls_visited: list, result_links:
     Falls back to `urls_visited` alone (pages the agent actually opened
     and read in full via `visit_webpage` — the strongest "used" signal
     available short of the model's own citations) if the model didn't
-    write a parseable/matching References section. Never falls back to
-    the full `result_links` dump.
+    write a parseable/matching References section. Only falls back
+    further to the full `result_links` dump (every link `web_search`
+    returned this turn) as a last resort, when neither a parseable
+    citation nor a visited page is available — weaker evidence, but
+    still better than reporting zero sources after a turn that genuinely
+    searched.
     """
     known_title_by_url = {}
     for u in urls_visited:
@@ -180,7 +184,18 @@ def resolve_actually_used_sources(answer: str, urls_visited: list, result_links:
 
     # Model gave nothing usable/real — fall back to pages it actually
     # opened (NOT every search hit) as the next-best "used" evidence.
-    return [(u, u) for u in urls_visited if u not in seen]
+    if urls_visited:
+        return [(u, u) for u in urls_visited if u not in seen]
+
+    # Model never explicitly visited a page either (common — many models
+    # answer directly from web_search's own snippets without ever calling
+    # visit_webpage) and left no parseable citations. Falling back to
+    # every link web_search returned this turn is weaker evidence than an
+    # explicit citation or a visited page, but a search DID genuinely run
+    # this turn, so showing nothing at all would be misleading — it would
+    # look like no research happened when it did. Only used as a last
+    # resort, after both stronger signals came up empty.
+    return list(result_links)
 
 
 def strip_trailing_references_section(answer: str) -> str:
@@ -291,6 +306,43 @@ GENERAL_AGENT_INSTRUCTIONS = (
     "Do not add citation numbers or a References section for answers "
     "that come purely from your own knowledge with no tool use."
 )
+
+
+def build_task_with_citation_reminder(user_message: str) -> str:
+    """Wrap the user's message with an explicit, PER-TASK reminder of the
+    citation requirement — a second layer on top of
+    GENERAL_AGENT_INSTRUCTIONS, mirroring rag_agent.build_strict_task()'s
+    "belt and braces" reasoning exactly.
+
+    Why this is needed: GENERAL_AGENT_INSTRUCTIONS (including its
+    citation requirement) is only ever attached to the agent if this
+    installed smolagents version's `CodeAgent.__init__` happens to expose
+    an `instructions=` parameter — see the
+    `if "instructions" in params: kwargs["instructions"] = ...` guard in
+    _build_code_agent() below. On a smolagents version where that
+    parameter doesn't exist, that assignment is silently skipped and the
+    model never sees the citation requirement AT ALL — it has no way to
+    know it's supposed to write a '### References' section, so
+    chat.py's resolve_actually_used_sources() always finds nothing to
+    parse, even after a turn that genuinely searched the web. Repeating
+    the requirement here, in the per-call task text (which always
+    reaches the model regardless of smolagents version), closes that
+    gap — same reasoning rag_agent.py already applies to its own
+    strict-grounding instructions.
+    """
+    return (
+        f"{user_message}\n\n"
+        "---\n"
+        "Reminder: if you use web_search or visit_webpage to answer this, "
+        "cite each such claim in-text with a bracketed number (e.g. [1]) "
+        "placed right after the claim, and end your final answer with a "
+        "'### References' section listing each numbered source's title "
+        "and URL, e.g.:\n"
+        "### References\n"
+        "[1] Page Title — https://example.com/page\n\n"
+        "If you answer purely from your own knowledge with no tool use, "
+        "skip the citation numbers and References section entirely."
+    )
 
 
 GENERAL_AGENT_DEFAULT_MAX_STEPS = 8

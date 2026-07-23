@@ -32,6 +32,15 @@ transformers>=4.51.0
 accelerate>=0.30.0
 bitsandbytes>=0.43.0            # optional 4/8-bit quantisation
 
+# ── LLM / inference — llama-server (external process) backend, optional ──
+# Used by llama_backend.py's LlamaServerModel / get_or_start_llama_server()
+# to talk HTTP to a separately-launched `llama-server` executable (an
+# ALTERNATIVE to the in-process llama-cpp-python backend below — pick one
+# via the "⚙️ LLM Backend" dropdown in the UI). requests is almost always
+# already present transitively (gradio pulls it in), but pinned explicitly
+# here since this backend depends on it directly.
+requests>=2.31.0
+
 # ── LLM / inference — llama.cpp (GGUF) backend, optional ──────────
 # IMPORTANT: `pip install -r requirements.txt` alone gives you the plain
 # CPU-only PyPI wheel for llama-cpp-python. For GPU acceleration (CUDA on
@@ -65,6 +74,24 @@ pandas>=2.0.0
 numpy>=1.26.0
 matplotlib>=3.8.0
 openpyxl>=3.1.0                 # required for pandas to read/write .xlsx
+
+# ── Deep Research — optional Playwright browser tools ─────────────
+# Used by deep_research_agent.py / playwright_search_tool.py when the
+# "Use Playwright (Headless Browser) Tools" checkbox is enabled on the
+# 🔬 Deep Research tab. IMPORTANT: `pip install playwright` alone is NOT
+# enough — the actual Chromium browser binary is a SEPARATE download that
+# `pip install` does not fetch. You must also run:
+#     playwright install chromium
+# SETUP.bat/SETUP.ps1 does both of these automatically (pip install +
+# `playwright install chromium`, with a real smoke test that launches a
+# real headless browser). Skipping this step is exactly what causes the
+# deep-research sub-agent's playwright_search / playwright_visit_page
+# tools to fail mid-run with "ImportError: ... needs the `playwright`
+# package and its browser binaries" — the checkbox stays enabled/usable
+# in the UI even though the browser binary was never actually installed,
+# since that import is deliberately deferred until the tool is actually
+# called (see playwright_search_tool.py's module docstring).
+playwright>=1.40.0
 
 # ── UI ────────────────────────────────────────────────────────────
 gradio>=4.40.0

@@ -74,8 +74,10 @@ CSS = """
 .header-wrap  { display:flex; align-items:baseline; gap:12px; margin-bottom:6px; }
 .header-title { font-size:1.6rem; font-weight:700; }
 .header-sub   { font-size:0.9rem; color:#aaa; }
-.dev-logo     { width:56px; height:56px; border-radius:50%; object-fit:cover;
-                box-shadow:0 0 8px rgba(120,80,255,0.6); flex-shrink:0; margin-right:4px; }
+.dev-logo     { width:88px !important; height:88px !important; min-width:88px !important;
+                max-width:88px !important; aspect-ratio:1/1; border-radius:50% !important;
+                object-fit:cover !important; object-position:center; display:block;
+                box-shadow:0 0 10px rgba(120,80,255,0.6); flex-shrink:0; margin-right:4px; }
 .beta-badge   { display:inline-block; font-size:0.68rem; font-weight:700; letter-spacing:0.5px;
                 color:#1a1a1a; background:#ffcc66; border-radius:999px; padding:2px 9px;
                 margin-left:6px; vertical-align:middle; }
@@ -119,7 +121,7 @@ def build_ui():
             with gr.Column(scale=8):
                 with gr.Row():
                     if branding.DEVELOPER_LOGO_B64:
-                        with gr.Column(scale=0, min_width=64):
+                        with gr.Column(scale=0, min_width=100):
                             gr.HTML(
                                 f'<img src="data:image/jpeg;base64,{branding.DEVELOPER_LOGO_B64}" '
                                 f'class="dev-logo" alt="{branding.DEVELOPER_NAME} logo" />'
@@ -170,6 +172,53 @@ def build_ui():
         ctx_window_status = gr.Textbox(show_label=False, interactive=False, visible=False)
         with gr.Accordion(L["accordion_details"], open=False) as acc_ctx_detail:
             ctx_window_detail_md = gr.Markdown(L["info_context_window_detail"])
+
+        # ── LLM Backend (GGUF only): in-process llama-cpp-python vs an ──
+        # external llama-server.exe process talked to over HTTP — see
+        # llama_backend.py's "llama-server (external process) backend"
+        # section and models.get_llm()'s GGUF branch for how this is
+        # actually dispatched. The exe path (like the GGUF folder above)
+        # is never hardcoded — leave it empty to keep using the original
+        # in-process backend.
+        with gr.Row():
+            llama_server_exe_tb = gr.Textbox(
+                value=llama_backend.LLAMA_SERVER_EXE_PATH,
+                placeholder=r"e.g. D:\llama.cpp\llama-server.exe — leave empty to use the in-process backend only",
+                label="🖥️ llama-server.exe Path", scale=6,
+            )
+            llama_server_args_tb = gr.Textbox(
+                value=llama_backend.LLAMA_SERVER_EXTRA_ARGS,
+                placeholder="optional extra flags, e.g. --flash-attn --parallel 2",
+                label="Extra llama-server Args", scale=4,
+            )
+            llm_backend_dd = gr.Dropdown(
+                choices=list(mr.LLM_BACKEND_MODE_OPTIONS.keys()),
+                value=mr.get_saved_llm_backend_label(),
+                label="⚙️ LLM Backend (GGUF only)", scale=4,
+            )
+        llama_server_status = gr.Textbox(show_label=False, interactive=False, visible=False)
+        with gr.Accordion(L["accordion_details"], open=False) as acc_llama_server_detail:
+            llama_server_detail_md = gr.Markdown(
+                "The default backend (**llama-cpp-python, in-process**) loads a "
+                "`.gguf` model directly inside this app's own Python process — "
+                "no extra setup needed beyond what SETUP.bat already installs.\n\n"
+                "**llama-server (external process)** instead launches a real "
+                "`llama-server` executable (from "
+                "[llama.cpp's releases](https://github.com/ggml-org/llama.cpp/releases), "
+                "or your own build) as a separate process and talks to it over "
+                "its OpenAI-compatible HTTP API. Use this if you have a "
+                "custom/optimized `llama-server` build, want a model to stay "
+                "loaded independently of this app, or don't have "
+                "llama-cpp-python installed at all. It reuses the exact same "
+                "GGUF model folder configured above — only *how* a selected "
+                "model actually runs changes, not where models are found.\n\n"
+                "Point '🖥️ llama-server.exe Path' at the executable, optionally "
+                "add extra CLI flags, then switch '⚙️ LLM Backend' to the "
+                "server option. The process is started lazily on first use and "
+                "reused across turns/tabs as long as the model, context window, "
+                "and backend selection don't change; it's stopped automatically "
+                "when you switch back, change those settings, or close the app."
+            )
 
         # ── Tabs ──────────────────────────────────────────────────
         with gr.Tabs():
@@ -322,6 +371,17 @@ def build_ui():
                     value="…", interactive=False,
                     show_label=False, elem_classes=["status-bar"]
                 )
+                with gr.Row():
+                    embed_dd = gr.Dropdown(
+                        choices=list(mr.EMBED_OPTIONS.keys()),
+                        value=mr.get_default_embed_label(),
+                        label=L["label_embed"], info=L["info_embed"], scale=8,
+                    )
+                    load_embed_btn   = gr.Button(L["btn_load"], size="sm", scale=1)
+                    unload_embed_btn = gr.Button(L["btn_unload"], size="sm", scale=1)
+                load_embed_out = gr.Textbox(show_label=False, interactive=False, visible=False)
+                with gr.Accordion(L["accordion_details"], open=False) as acc_embed_detail:
+                    embed_detail_md = gr.Markdown(L["info_embed_detail"])
                 with gr.Accordion(L["accordion_add"], open=True) as acc_add:
                     file_up    = gr.File(label=L["file_label"], file_types=[".pdf",".txt",".md",".docx"], file_count="multiple")
                     vis_ret_dd = gr.Dropdown(choices=list(mr.VISUAL_RETRIEVER_OPTIONS.keys()), value=list(mr.VISUAL_RETRIEVER_OPTIONS.keys())[0], label=L["label_vis_ret"])
@@ -397,6 +457,27 @@ def build_ui():
                             label=L["label_memory"], value=True,
                             info=L["info_memory"],
                         )
+                        dr_use_playwright_chk = gr.Checkbox(
+                            label="Use Playwright (Headless Browser) Tools", value=False,
+                            info="Use Playwright for searching and browsing. Requires Playwright browsers installed.",
+                        )
+                        dr_headless_chk = gr.Checkbox(
+                            label="Run Playwright Headless", value=False,
+                            info="If unchecked, Playwright will open a visible browser window (with head).",
+                        )
+                        with gr.Accordion("Advanced Agent Settings", open=False):
+                            dr_manager_max_steps = gr.Slider(
+                                minimum=1, maximum=30, step=1, value=12,
+                                label="Manager Agent Max Steps"
+                            )
+                            dr_search_max_steps = gr.Slider(
+                                minimum=1, maximum=15, step=1, value=6,
+                                label="Search Sub-agent Max Steps"
+                            )
+                            dr_timeout = gr.Slider(
+                                minimum=30, maximum=300, step=10, value=90,
+                                label="Code Execution Timeout (seconds)"
+                            )
                         with gr.Accordion(L["accordion_details"], open=False) as acc_dr_detail:
                             dr_memory_detail_md = gr.Markdown(L["info_memory_detail"])
                         model_dd_dr = gr.Dropdown(choices=list(mr.MODEL_OPTIONS.keys()), value=mr.DEFAULT_LLM_LABEL, label=L["label_llm"])
@@ -476,6 +557,54 @@ def build_ui():
             return gr.update(value=msg, visible=True)
 
         ctx_window_dd.change(do_change_context_window, [ctx_window_dd], [ctx_window_status])
+
+        # ── llama-server (external process) backend controls ────────
+        def _reset_every_agent_cache():
+            # Every agentic CodeAgent wrapper holds its own reference to
+            # the shared LLM object — drop all four caches so none of
+            # them keep pointing at a model instance that's about to be
+            # replaced/reloaded under a different backend (mirrors
+            # do_change_context_window()'s reset above).
+            general_agent.reset_agent()
+            rag_agent.reset_agent()
+            data_analysis.reset_agent()
+            deep_research_agent.reset_agent()
+
+        def do_set_llama_server_path(path):
+            llama_backend.set_llama_server_exe_path(path)
+            msg = (f"✅ llama-server path saved: '{path}'" if path
+                   else "ℹ️ Cleared — the llama-server backend is unavailable until a path is set.")
+            return gr.update(value=msg, visible=True)
+
+        def do_set_llama_server_args(args_str):
+            llama_backend.set_llama_server_extra_args(args_str)
+            return gr.update(value=f"✅ Extra llama-server args saved: '{args_str}'" if args_str
+                              else "✅ Extra llama-server args cleared.", visible=True)
+
+        def do_change_llm_backend(label):
+            mode = mr.LLM_BACKEND_MODE_OPTIONS.get(label, "inprocess")
+            mr.set_llm_backend_mode(mode)
+            _reset_every_agent_cache()
+            # A backend switch can't be hot-applied to an already-loaded
+            # model — always fully release whatever's currently loaded
+            # (in-process weights OR a running llama-server subprocess;
+            # see models._release_model()'s LlamaServerModel branch) so
+            # the NEXT get_llm() call rebuilds cleanly under the newly
+            # selected backend instead of silently reusing a stale one.
+            currently_loaded = models._llm_model_id
+            had_model_loaded = models._llm is not None
+            llama_backend.stop_llama_server()
+            if had_model_loaded:
+                models._release_model(models._llm)
+                models._llm = None
+            msg = (f"✅ Backend set to '{label}'."
+                   + (f" '{currently_loaded}' will reload under the new backend on next use."
+                      if had_model_loaded and str(currently_loaded).lower().endswith(".gguf") else ""))
+            return gr.update(value=msg, visible=True)
+
+        llama_server_exe_tb.submit(do_set_llama_server_path, [llama_server_exe_tb], [llama_server_status])
+        llama_server_args_tb.submit(do_set_llama_server_args, [llama_server_args_tb], [llama_server_status])
+        llm_backend_dd.change(do_change_llm_backend, [llm_backend_dd], [llama_server_status])
 
         # General Chat
         def reload_gen_fn(label):
@@ -653,20 +782,20 @@ def build_ui():
                 visible=True,
             )
 
-        def do_chat_deep_research(pending_message, history, model_label, use_memory):
-            history, _ = chat.chat_deep_research(pending_message, history, model_label, use_memory)
+        def do_chat_deep_research(pending_message, history, model_label, use_memory, use_playwright, headless, manager_max_steps, search_max_steps, timeout):
+            history, _ = chat.chat_deep_research(pending_message, history, model_label, use_memory, use_playwright, headless, manager_max_steps, search_max_steps, timeout)
             return history, gr.update(open=True), gr.update(visible=False)
 
         msg_dr.submit(stash_dr, [msg_dr], [msg_dr, pending_dr_msg], queue=False).then(
             show_thinking_dr, None, [status_dr], queue=False
         ).then(
-            do_chat_deep_research, [pending_dr_msg, bot_dr, model_dd_dr, dr_memory_chk],
+            do_chat_deep_research, [pending_dr_msg, bot_dr, model_dd_dr, dr_memory_chk, dr_use_playwright_chk, dr_headless_chk, dr_manager_max_steps, dr_search_max_steps, dr_timeout],
             [bot_dr, acc_dr_chat, status_dr]
         )
         send_dr.click(stash_dr, [msg_dr], [msg_dr, pending_dr_msg], queue=False).then(
             show_thinking_dr, None, [status_dr], queue=False
         ).then(
-            do_chat_deep_research, [pending_dr_msg, bot_dr, model_dd_dr, dr_memory_chk],
+            do_chat_deep_research, [pending_dr_msg, bot_dr, model_dd_dr, dr_memory_chk, dr_use_playwright_chk, dr_headless_chk, dr_manager_max_steps, dr_search_max_steps, dr_timeout],
             [bot_dr, acc_dr_chat, status_dr]
         )
 
@@ -802,6 +931,45 @@ def build_ui():
         clear_data.click(clear_data_fn,
                          outputs=[bot_data, data_gallery, data_report_file, acc_data_chat, acc_data_results, status_data])
         reset_data_btn.click(reset_data_agent_fn, outputs=[reset_data_out])
+
+        # Knowledge Base — Embedding Model
+        def load_embed_fn(label, lang_key):
+            mid = mr.EMBED_OPTIONS.get(label, mr.DEFAULT_EMBED_MODEL)
+            # Check BEFORE switching: if documents are already indexed,
+            # warn about the dimension mismatch this can cause rather than
+            # letting the user discover it only on the next query/upload —
+            # see knowledge_base.get_collection_embedding_dim().
+            existing_dim = kb.get_collection_embedding_dim()
+            mr.set_embed_model(mid)
+            try:
+                models.force_reload_embed_model(mid)
+                msg = f"✅ '{mid}' loaded."
+                if existing_dim is not None:
+                    new_dim = mr.EMBED_MODEL_DIMENSIONS.get(mid)
+                    if new_dim is not None and new_dim != existing_dim:
+                        msg += (
+                            f" ⚠️ Your knowledge base was indexed at "
+                            f"{existing_dim} dimensions — '{mid}' produces "
+                            f"{new_dim}. Retrieval will fail until you switch "
+                            f"back or clear ('💥 Clear ALL') and re-index."
+                        )
+                    else:
+                        msg += (
+                            " ⚠️ Your knowledge base already has indexed "
+                            "documents — if this model's vector dimension "
+                            "differs from what they were indexed with, "
+                            "retrieval will fail until you switch back or "
+                            "clear ('💥 Clear ALL') and re-index."
+                        )
+                return gr.update(value=msg, visible=True)
+            except Exception as e:
+                return gr.update(value=f"❌ {e}", visible=True)
+
+        def unload_embed_fn(lang_key):
+            return gr.update(value=models.unload_embed_model_fn(lang_key), visible=True)
+
+        load_embed_btn.click(load_embed_fn, [embed_dd, lang_state], [load_embed_out])
+        unload_embed_btn.click(unload_embed_fn, [lang_state], [load_embed_out])
 
         # Knowledge Base
         def on_select(evt: gr.SelectData, current):
@@ -942,6 +1110,11 @@ def build_ui():
                 gr.update(label=l["label_memory"], info=l["info_memory"]),
                 gr.update(value=l["btn_reset_agent"]),
                 # Knowledge Base
+                gr.update(label=l["label_embed"], info=l["info_embed"]),
+                gr.update(value=l["btn_load"]),
+                gr.update(value=l["btn_unload"]),
+                gr.update(label=l["accordion_details"]),
+                gr.update(value=l["info_embed_detail"]),
                 gr.update(label=l["accordion_add"]),
                 gr.update(label=l["file_label"]),
                 gr.update(label=l["label_vis_ret"]),
@@ -986,6 +1159,7 @@ def build_ui():
             data_file_up, msg_data, send_data, clear_data, acc_data_chat, acc_data_results, data_gallery, data_report_file,
             data_settings_header, data_desc, model_dd_data, data_memory_chk, reset_data_btn,
             # Knowledge Base
+            embed_dd, load_embed_btn, unload_embed_btn, acc_embed_detail, embed_detail_md,
             acc_add, file_up, vis_ret_dd, up_btn, unload_visual_btn, up_msg,
             acc_kb_docs, refresh_btn, delete_sel_btn, clear_all_btn,
             # Status bars (Knowledge Base tab + RAG Chat tab)
@@ -1025,5 +1199,21 @@ def build_ui():
         # instead of during build_ui().
         demo.load(kb.get_index_stats, [lang_state], [kb_status_bar])
         demo.load(kb.get_index_stats, [lang_state], [rag_status_bar])
+
+        # ── Live-refresh index stats on tab click ────────────────
+        # The demo.load() calls above only run once, right after the page
+        # mounts — they do NOT re-fire just because the user later clicks
+        # into the Knowledge Base or RAG Chat tab. That means the chunk
+        # count shown can go stale: e.g. documents indexed from another
+        # browser tab/session, via the CLI (index_docs.py), or even just
+        # left open for a while, won't be reflected until an explicit
+        # upload/delete/clear/refresh action fires elsewhere in THIS tab.
+        # Hooking .select() on both tabs makes every click into either one
+        # re-read the real ChromaDB count, so what's on screen always
+        # matches the current on-disk index the moment you look at it.
+        tab_kb.select(kb.get_index_stats, [lang_state], [kb_status_bar])
+        tab_kb.select(kb.get_index_stats, [lang_state], [rag_status_bar])
+        tab_rag.select(kb.get_index_stats, [lang_state], [kb_status_bar])
+        tab_rag.select(kb.get_index_stats, [lang_state], [rag_status_bar])
 
         return demo

@@ -1,4 +1,4 @@
-﻿"""
+"""
 i18n.py — Localization (Khmer / English) strings for the Multipurpose AI
 Assistant UI. Kept isolated so translations can be edited without touching
 any app logic.
@@ -78,6 +78,17 @@ LANGUAGES = {
         "label_vis_rag": "🔍 ក៏ស្វែងរករូបភាពពាក់ព័ន្ធពី Visual Index (Visual RAG)",
         "label_vis_rag_info": "ត្រូវការ Visual Index ជាមុន",
         "label_vis_rag_info_detail": "ត្រូវការឯកសារ PDF ដែលបានបញ្ចូលជា Visual Index ជាមុនសិន (ផ្ទាំង 📂) — បើគ្មានទេ វានឹងមិនរកឃើញរូបភាពណាមួយឡើយ។ បរិបទអត្ថបទត្រូវបានទាញយកជានិច្ច ដោយមិនអាស្រ័យលើប្រអប់នេះ។",
+        "label_embed": "🧩 ម៉ូដែល Embedding",
+        "info_embed": "ត្រូវការសម្អាត និងបញ្ចូលឡើងវិញ ប្រសិនបើប្តូរបន្ទាប់ពីបានបញ្ចូលឯកសារ",
+        "info_embed_detail": (
+            "ម៉ូដែល Embedding កំណត់ថាតើអត្ថបទត្រូវបានបំលែងទៅជាវ៉ិចទ័រយ៉ាងដូចម្តេច "
+            "សម្រាប់ការស្វែងរកក្នុង ChromaDB។ ⚠️ ការប្តូរម៉ូដែលនេះ **មិន** បំលែងឯកសារ "
+            "ដែលបានបញ្ចូលរួចហើយទៅជាទម្រង់ថ្មីទេ — វ៉ិចទ័រពីម៉ូដែលផ្សេងគ្នាមិនអាចប្រៀបធៀបគ្នាបាន "
+            "ហើយ ChromaDB កំណត់ទំហំវ៉ិចទ័រនៅពេលបង្កើត collection ជាលើកដំបូង។ ប្រសិនបើអ្នកមាន "
+            "ឯកសារបានបញ្ចូលរួចហើយ ការប្តូរម៉ូដែលនេះនឹងធ្វើឱ្យការស្វែងរកបរាជ័យ (កំហុស 'dimension "
+            "mismatch') រហូតដល់អ្នក ត្រលប់ទៅម៉ូដែលដើមវិញ ឬ សម្អាតទាំងអស់ ('💥 លុបទាំងអស់') "
+            "ហើយបញ្ចូលឯកសារឡើងវិញជាមួយម៉ូដែលថ្មី។"
+        ),
         "label_vis_ret": "🖼️ អ្នកទាញយកចក្ខុវិស័យ (PDFs)",
         "label_res": "លទ្ធផល",
         "doc_table_headers": ["ប្រភព", "ប្រភេទ", "ទំព័រ", "ចំនួន Chunk"],
@@ -199,6 +210,19 @@ LANGUAGES = {
         "label_vis_rag": "🔍 Also search visual index for related images (Visual RAG)",
         "label_vis_rag_info": "Requires a Visual Index first",
         "label_vis_rag_info_detail": "Requires PDFs already indexed into the Visual Index first (📂 tab) — otherwise no images will be found. Text context is always retrieved regardless of this box.",
+        "label_embed": "🧩 Embedding Model",
+        "info_embed": "Needs a clear + re-index if changed after documents are indexed",
+        "info_embed_detail": (
+            "The embedding model determines how text is turned into vectors for "
+            "ChromaDB search. ⚠️ Switching this does NOT re-embed documents "
+            "already indexed — vectors from different embedding models aren't "
+            "comparable, and ChromaDB locks a collection to whatever vector "
+            "dimension it was first created with. If you already have documents "
+            "indexed, switching models will make retrieval fail (a 'dimension "
+            "mismatch' error) until you either switch back to the original "
+            "model, or clear everything ('💥 Clear ALL') and re-index with the "
+            "new one."
+        ),
         "label_vis_ret": "🖼️ Visual retriever (PDFs)",
         "label_res": "Result",
         "doc_table_headers": ["Source", "Type", "Pages", "Chunks"],

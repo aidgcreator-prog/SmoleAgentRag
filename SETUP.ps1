@@ -1,4 +1,23 @@
-﻿$OutputEncoding = [System.Text.Encoding]::UTF8
+﻿param(
+    # -SkipLlamaCpp: skip installing/building llama-cpp-python entirely
+    # (Step 6 below), without being asked interactively. Useful for CI/
+    # scripted installs, or when you already know you'll only use the
+    # external llama-server.exe backend (see llama_backend.py /
+    # model_registry.LLM_BACKEND_MODE_OPTIONS) and don't need the
+    # in-process one.
+    [switch]$SkipLlamaCpp,
+    # -InstallLlamaCpp: force installing/building it, without being asked
+    # interactively (opposite of -SkipLlamaCpp). Takes priority if both
+    # are somehow passed.
+    [switch]$InstallLlamaCppForced,
+    # -NonInteractive: never prompt (e.g. unattended/CI runs). Without
+    # -SkipLlamaCpp/-InstallLlamaCppForced also set, defaults to
+    # installing it (the original, pre-existing behaviour), so a plain
+    # unattended run doesn't silently change what it sets up.
+    [switch]$NonInteractive
+)
+
+$OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try { $Host.UI.RawUI.WindowTitle = "ជំនួយការ AI ពហុមុខងារ - ការដំឡើង" } catch {}
 
@@ -25,7 +44,7 @@ if (-not (Test-Path (Join-Path $root "app.py"))) {
 }
 
 # ── STEP 1: Check / Install Python (requires 3.9+) ───────────────
-Write-Host "[1/8] កំពុងពិនិត្យមើលការដំឡើង Python..."
+Write-Host "[1/9] កំពុងពិនិត្យមើលការដំឡើង Python..."
 $needPython = $false
 $pyVer = $null
 
@@ -109,7 +128,7 @@ Write-Host "[OK] pip អាចប្រើប្រាស់បាន។" -Foreg
 
 # ── STEP 2: Create virtual environment ────────────────────────────
 Write-Host ""
-Write-Host "[2/8] កំពុងបង្កើត virtual environment (.venv)..."
+Write-Host "[2/9] កំពុងបង្កើត virtual environment (.venv)..."
 $venvPython = Join-Path $root ".venv\Scripts\python.exe"
 if (Test-Path $venvPython) {
     Write-Host "[OK] .venv មានរួចហើយ កំពុងរំលងការបង្កើត។" -ForegroundColor Green
@@ -133,13 +152,13 @@ try {
 
 # ── STEP 3: Upgrade pip ────────────────────────────────────────────
 Write-Host ""
-Write-Host "[3/8] កំពុងធ្វើបច្ចុប្បន្នភាព pip..."
+Write-Host "[3/9] កំពុងធ្វើបច្ចុប្បន្នភាព pip..."
 & python -m pip install --upgrade pip --quiet
 Write-Host "[OK] pip ទាន់សម័យហើយ។" -ForegroundColor Green
 
 # ── STEP 4: Detect GPU — NVIDIA / AMD ROCm / CPU ──────────────────
 Write-Host ""
-Write-Host "[4/8] កំពុងរកឃើញ GPU..."
+Write-Host "[4/9] កំពុងរកឃើញ GPU..."
 $gpuBrand = "none"
 $cudaVersion = "cpu"
 $torchIndex = "https://download.pytorch.org/whl/cpu"
@@ -269,9 +288,9 @@ if (-not $gpuDone) {
 # ── STEP 5: Install PyTorch ─────────────────────────────────────────
 Write-Host ""
 if ($cudaVersion -eq "cpu") {
-    Write-Host "[5/8] កំពុងដំឡើង PyTorch (CPU-only)..."
+    Write-Host "[5/9] កំពុងដំឡើង PyTorch (CPU-only)..."
 } else {
-    Write-Host "[5/8] កំពុងដំឡើង PyTorch ($cudaVersion)..."
+    Write-Host "[5/9] កំពុងដំឡើង PyTorch ($cudaVersion)..."
 }
 Write-Host "      អាចចំណាយពេលច្រើននាទី (torch មានទំហំប្រហែល ២-៣ GB)..."
 & python -m pip install torch torchvision torchaudio --index-url $torchIndex --quiet
@@ -347,9 +366,58 @@ if ($cudaVersion -ne "cpu") {
     }
 }
 
+# ── Decide whether to install/build llama-cpp-python at all ──────────
+# This is by far the SLOWEST part of setup — a prebuilt-wheel probe loop
+# across several CUDA tiers, and (if none of those work) a full from-
+# -source CMake build, can together take many minutes. It is also no
+# longer the ONLY way to run GGUF models: the app now also supports an
+# external `llama-server` executable as an alternative backend (see
+# llama_backend.py / the "⚙️ LLM Backend" dropdown in the UI) — that
+# backend needs no Python build at all, just a llama-server(.exe) binary
+# pointed at from the app's UI. So this step is offered as an explicit,
+# skippable choice instead of always running unconditionally.
+if ($SkipLlamaCpp) {
+    $InstallLlamaCpp = $false
+} elseif ($InstallLlamaCppForced) {
+    $InstallLlamaCpp = $true
+} elseif ($NonInteractive) {
+    # Unattended run with no explicit preference — keep the original,
+    # pre-existing behaviour (install it) so scripted installs don't
+    # silently change what they set up.
+    $InstallLlamaCpp = $true
+} else {
+    Write-Host ""
+    Write-Host "------------------------------------------------------------" -ForegroundColor Cyan
+    Write-Host " ជម្រើស៖ ដំឡើង/សាងសង់ llama-cpp-python (សម្រាប់ម៉ូដែល GGUF)?" -ForegroundColor Cyan
+    Write-Host "------------------------------------------------------------" -ForegroundColor Cyan
+    Write-Host " នេះជាជំហានយឺតបំផុតនៃការដំឡើង (អាចចំណាយពេលច្រើននាទី ជាពិសេស"
+    Write-Host " ប្រសិនបើត្រូវសាងសង់ពី source)។ ចាប់ពីកំណែនេះ អ្នកមិនចាំបាច់"
+    Write-Host " ដំឡើងវាទៀតទេ ដើម្បីប្រើម៉ូដែល GGUF — កម្មវិធីគាំទ្រ backend"
+    Write-Host " ជំនួស 'llama-server (external process)' ដែលគ្រាន់តែត្រូវការ"
+    Write-Host " ឯកសារ llama-server.exe (ទាញយកពី llama.cpp releases) ដោយកំណត់"
+    Write-Host " ផ្លូវរបស់វានៅក្នុង UI របស់កម្មវិធី — មិនតម្រូវឱ្យសាងសង់អ្វីទាំងអស់។"
+    Write-Host ""
+    $resp = Read-Host " ដំឡើង llama-cpp-python ឥឡូវនេះ? [Y/n]"
+    $InstallLlamaCpp = -not ($resp -match '^(n|no|ទេ)$')
+    if ($InstallLlamaCpp) {
+        Write-Host "[OK] នឹងដំឡើង llama-cpp-python ។" -ForegroundColor Green
+    } else {
+        Write-Host "[OK] រំលង — អ្នកអាចប្រើ llama-server.exe ខាងក្រៅជំនួសវិញ បន្ទាប់ពី" -ForegroundColor Yellow
+        Write-Host "     ដំណើរការកម្មវិធី ដោយកំណត់ផ្លូវរបស់វានៅផ្នែកខាងលើនៃ UI ។" -ForegroundColor Yellow
+    }
+}
+
 # ── STEP 6: Install llama-cpp-python (GGUF backend), hardware-aware ──
 Write-Host ""
-Write-Host "[6/8] កំពុងដំឡើង llama-cpp-python (សម្រាប់ម៉ូដែល GGUF)..."
+Write-Host "[6/9] កំពុងដំឡើង llama-cpp-python (សម្រាប់ម៉ូដែល GGUF)..."
+
+if (-not $InstallLlamaCpp) {
+    Write-Host "[រំលង] បានរំលងការដំឡើង/សាងសង់ llama-cpp-python តាមជម្រើសរបស់អ្នក។" -ForegroundColor Yellow
+    Write-Host "        ម៉ូដែល GGUF នៅតែអាចប្រើបានតាមរយៈ backend 'llama-server (external process)'" -ForegroundColor Yellow
+    Write-Host "        — កំណត់ផ្លូវ llama-server.exe នៅផ្នែកខាងលើនៃ UI របស់កម្មវិធី។" -ForegroundColor Yellow
+    $llamaCppInstalled = $false
+    $llamaCppMode       = "skipped"
+} else {
 
 # Must match the GGUF model folder used by app.py — used to find a real
 # .gguf file for the thorough smoke test below, if the user has one.
@@ -537,9 +605,11 @@ if (-not $llamaCppInstalled) {
     }
 }
 
+} # end if ($InstallLlamaCpp) — see the "Decide whether to install/build llama-cpp-python at all" section above
+
 # ── STEP 7: Install project requirements ────────────────────────────
 Write-Host ""
-Write-Host "[7/8] កំពុងដំឡើង dependencies របស់គម្រោង (requirements.txt)..."
+Write-Host "[7/9] កំពុងដំឡើង dependencies របស់គម្រោង (requirements.txt)..."
 Write-Host "      អាចចំណាយពេលច្រើននាទី..."
 
 Write-Host " កំពុងដំឡើង packages ស្នូល..."
@@ -591,9 +661,83 @@ if ($coreExit -ne 0) {
 }
 Write-Host "[OK] Dependencies ត្រូវបានដំឡើង។" -ForegroundColor Green
 
-# ── STEP 8: Quick smoke test ─────────────────────────────────────────
+# ── STEP 8: Install Playwright (Deep Research's optional browser tools) ──
+# Used by deep_research_agent.py / playwright_search_tool.py when the
+# "Use Playwright (Headless Browser) Tools" checkbox is enabled on the
+# 🔬 Deep Research tab. This is a SEPARATE, TWO-PART install:
+#   1. `pip install playwright` — the Python package/API bindings.
+#   2. `playwright install chromium` — the actual browser binary, which
+#      pip does NOT download on its own.
+# Skipping part 2 is exactly what used to cause a confusing failure: the
+# checkbox stays present and clickable in the UI, the app builds the
+# agent's Playwright tools without error, and only the FIRST actual
+# search/visit-page call fails deep into a run (burning a full agent
+# step and real wall-clock time) with "ImportError: ... needs the
+# `playwright` package and its browser binaries". Running both install
+# steps here, with a real smoke test that launches an actual headless
+# browser (not just checking the import), catches that gap at setup
+# time instead of mid-research-run. This feature is optional — Deep
+# Research's default (non-Playwright) search tools already work without
+# it — so any failure here is a warning, not a fatal setup error.
 Write-Host ""
-Write-Host "[8/8] កំពុងសាកល្បងប្រព័ន្ធ (smoke test)..."
+Write-Host "[8/9] កំពុងដំឡើង Playwright (ឧបករណ៍ browser ជម្រើសសម្រាប់ ស្រាវជ្រាវស៊ីជម្រៅ)..."
+
+$playwrightInstalled = $false
+
+& python -m pip install "playwright>=1.40.0" --quiet
+if ($LASTEXITCODE -eq 0) {
+    Write-Host " កំពុងទាញយក Chromium browser binary (playwright install chromium)..."
+    Write-Host "      អាចចំណាយពេលច្រើននាទី (ទាញយកប្រហែល ១៥០-៣០០ MB)..."
+    & python -m playwright install chromium --with-deps *> $null
+    if ($LASTEXITCODE -ne 0) {
+        # --with-deps needs elevated/root privileges on some systems to
+        # install OS-level libraries; retry without it — the browser
+        # binary itself still installs fine without --with-deps on most
+        # Windows machines, which already ship the needed system libs.
+        & python -m playwright install chromium
+    }
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host " កំពុងផ្ទៀងផ្ទាត់ដោយបើក Chromium ពិតប្រាកដ (headless smoke test)..."
+        $pwCode = "from playwright.sync_api import sync_playwright`nwith sync_playwright() as p:`n    b = p.chromium.launch(headless=True)`n    b.close()`nprint('OK')"
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName               = "python"
+        $psi.Arguments              = "-c `"$pwCode`""
+        $psi.UseShellExecute        = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError  = $true
+        $pwOk = $false
+        try {
+            $proc = [System.Diagnostics.Process]::Start($psi)
+            $finished = $proc.WaitForExit(60000)
+            if ($finished -and $proc.ExitCode -eq 0) { $pwOk = $true }
+            elseif (-not $finished) { try { $proc.Kill() } catch {} }
+        } catch {}
+
+        if ($pwOk) {
+            Write-Host "[OK] Playwright + Chromium ត្រូវបានដំឡើង និងផ្ទៀងផ្ទាត់ដោយជោគជ័យ។" -ForegroundColor Green
+            $playwrightInstalled = $true
+        } else {
+            Write-Host "[ព្រមាន] Chromium ត្រូវបានទាញយក ប៉ុន្តែការសាកល្បងបើក browser ពិតប្រាកដបានបរាជ័យ។" -ForegroundColor Yellow
+            Write-Host "         ប្រអប់ 'Use Playwright (Headless Browser) Tools' នៅផ្ទាំង ស្រាវជ្រាវស៊ីជម្រៅ អាចនឹងមិនដំណើរការទេ។" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "[ព្រមាន] ការទាញយក Chromium browser binary បានបរាជ័យ។" -ForegroundColor Yellow
+        Write-Host "         សូមសាកល្បងដោយដៃពេលក្រោយ: python -m playwright install chromium" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "[ព្រមាន] ការដំឡើង playwright package បានបរាជ័យ។" -ForegroundColor Yellow
+}
+
+if (-not $playwrightInstalled) {
+    Write-Host " ចំណាំ: នេះជាមុខងារជម្រើសសម្រាប់ផ្ទាំង 🔬 ស្រាវជ្រាវស៊ីជម្រៅ តែប៉ុណ្ណោះ — កម្មវិធីនៅតែដំណើរការធម្មតា" -ForegroundColor Yellow
+    Write-Host " ដោយប្រើឧបករណ៍ស្វែងរកលំនាំដើម (DuckDuckGo) ។ កុំធីក 'Use Playwright (Headless Browser) Tools'" -ForegroundColor Yellow
+    Write-Host " នៅលើផ្ទាំងនោះ ប្រសិនបើអ្នកមិនបានដំណើរការជំហាននេះដោយជោគជ័យទេ។" -ForegroundColor Yellow
+}
+
+# ── STEP 9: Quick smoke test ─────────────────────────────────────────
+Write-Host ""
+Write-Host "[9/9] កំពុងសាកល្បងប្រព័ន្ធ (smoke test)..."
 & python -c "import torch, chromadb, gradio, smolagents; cuda=torch.cuda.is_available(); dev=torch.cuda.get_device_name(0) if cuda else 'CPU only'; print('  torch:', torch.__version__, '| GPU available:', cuda, '|', dev); print('  All imports OK')"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ព្រមាន] ការសាកល្បងមានបញ្ហា - សូមពិនិត្យលទ្ធផលខាងលើ។" -ForegroundColor Yellow
@@ -603,8 +747,18 @@ if ($LASTEXITCODE -ne 0) {
 
 if ($llamaCppInstalled) {
     Write-Host "[OK] llama-cpp-python (GGUF): ដំណើរការក្នុងម៉ូដ '$llamaCppMode' ។" -ForegroundColor Green
+} elseif ($llamaCppMode -eq "skipped") {
+    Write-Host "[ចំណាំ] llama-cpp-python (GGUF, in-process): បានរំលងតាមជម្រើសរបស់អ្នក។ ម៉ូដែល GGUF" -ForegroundColor Cyan
+    Write-Host "        នៅតែអាចប្រើបាន តាមរយៈ backend 'llama-server (external process)' — កំណត់ផ្លូវ" -ForegroundColor Cyan
+    Write-Host "        llama-server.exe នៅផ្នែកខាងលើនៃ UI របស់កម្មវិធី។" -ForegroundColor Cyan
 } else {
     Write-Host "[ព្រមាន] llama-cpp-python (GGUF): មិនអាចដំឡើងបានទេ - ម៉ូដែល .gguf នឹងមិនអាចប្រើបានទេ។" -ForegroundColor Yellow
+}
+
+if ($playwrightInstalled) {
+    Write-Host "[OK] Playwright (Deep Research browser tools): ត្រូវបានដំឡើង និងផ្ទៀងផ្ទាត់។" -ForegroundColor Green
+} else {
+    Write-Host "[ព្រមាន] Playwright (Deep Research browser tools): មិនអាចប្រើបានទេ - ប្រអប់ 'Use Playwright' នៅតែបង្ហាញ ប៉ុន្តែសូមកុំធីកវា។" -ForegroundColor Yellow
 }
 
 # PyTorch's final, VERIFIED status — reflects the real-kernel smoke test
@@ -631,3 +785,4 @@ Write-Host ""
 Write-Host " កម្មវិធីនឹងបើកនៅ:  http://localhost:7861"
 Write-Host ""
 Read-Host "ចុច Enter ដើម្បីបិទ"
+

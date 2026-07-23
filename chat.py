@@ -195,7 +195,19 @@ def chat_general_agentic(user_message: str, history: list, model_label: str, use
         # unboundedly turn after turn. When the "🧠 Conversation Memory"
         # checkbox is off, reset=True instead, so every message starts
         # from a clean slate (no memory to cap either).
-        result = agent.run(user_message, reset=not use_memory)
+        #
+        # The message is wrapped with a per-task citation reminder (NOT
+        # just the raw user_message) because GENERAL_AGENT_INSTRUCTIONS'
+        # citation requirement only reaches the model at all if this
+        # installed smolagents version's CodeAgent accepts an
+        # `instructions=` kwarg (see general_agent._build_code_agent()) —
+        # on a version where it doesn't, this per-call reminder is the
+        # ONLY place the model ever sees the requirement. Without it, the
+        # model never writes a '### References' section, and the
+        # "Sources used" block below always ends up empty even after a
+        # turn that genuinely searched the web.
+        task = general_agent.build_task_with_citation_reminder(user_message)
+        result = agent.run(task, reset=not use_memory)
         if use_memory:
             agent_memory.cap_agent_memory(agent, max_turns=AGENTIC_MEMORY_TURNS)
         elapsed = time.time() - t0
@@ -454,7 +466,7 @@ def chat_vision(user_message: str, uploaded_image, history: list,
     return history, None
 
 
-def chat_deep_research(user_message: str, history: list, model_label: str, use_memory: bool = True):
+def chat_deep_research(user_message: str, history: list, model_label: str, use_memory: bool = True, use_playwright: bool = False, headless: bool = True, manager_max_steps: int = 12, search_max_steps: int = 6, timeout: int = 90):
     """Deep Research tab: a two-agent smolagents setup modeled on
     HuggingFace's own open_deep_research example (see
     https://github.com/huggingface/smolagents/tree/main/examples/open_deep_research)
@@ -482,7 +494,7 @@ def chat_deep_research(user_message: str, history: list, model_label: str, use_m
     history.append({"role": "user", "content": user_message})
     model_id = mr.MODEL_OPTIONS.get(model_label, mr.DEFAULT_LLM_MODEL)
     try:
-        agent = deep_research_agent.get_deep_research_agent(model_id)
+        agent = deep_research_agent.get_deep_research_agent(model_id, use_playwright, headless, manager_max_steps, search_max_steps, timeout)
         deep_research_agent.reset_tool_usage()
         t0     = time.time()
         # reset=False keeps the manager's own memory (its steps include
@@ -490,7 +502,15 @@ def chat_deep_research(user_message: str, history: list, model_label: str, use_m
         # smolagents pattern as every other agentic tab. Capped right
         # after so a long research conversation doesn't grow the prompt
         # unboundedly turn after turn.
-        result = agent.run(user_message, reset=not use_memory)
+        #
+        # Wrapped with a per-task citation reminder (NOT just the raw
+        # user_message) for the same reason as chat_general_agentic()
+        # above: DEEP_RESEARCH_INSTRUCTIONS' citation requirement only
+        # reaches the manager if this smolagents version's CodeAgent
+        # accepts `instructions=` — on a version where it doesn't, this
+        # is the only place the requirement is ever stated.
+        task = deep_research_agent.build_task_with_citation_reminder(user_message)
+        result = agent.run(task, reset=not use_memory)
         if use_memory:
             agent_memory.cap_agent_memory(agent, max_turns=DEEP_RESEARCH_MEMORY_TURNS)
         elapsed = time.time() - t0
